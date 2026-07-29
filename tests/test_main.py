@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr
+import hashlib
 from io import StringIO
 from pathlib import Path
 import tempfile
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import main
+import pytest
 from agents import FunctionTool
 from agents.tool_context import ToolContext
 from openai.types.responses import (
@@ -312,6 +314,36 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
             "[reasoning]\nthinking\n[content]\nanswer\n",
         )
 
+    async def test_captures_reasoning_and_content_without_console_stream(
+        self,
+    ) -> None:
+        captured_response = StringIO()
+        result = make_stream_result(
+            make_raw_response_event(
+                ResponseReasoningSummaryTextDeltaEvent.model_construct(
+                    delta="thinking"
+                )
+            ),
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta="answer")
+            ),
+            final_output="answer",
+        )
+
+        with patch.object(main.Runner, "run_streamed", return_value=result):
+            output = await main.run_code_agent(
+                "Think",
+                enable_reasoning=True,
+                output_stream=None,
+                capture_stream=captured_response,
+            )
+
+        self.assertEqual(output, "answer")
+        self.assertEqual(
+            captured_response.getvalue(),
+            "[reasoning]\nthinking\n[content]\nanswer\n",
+        )
+
     async def test_hides_reasoning_stream_when_reasoning_is_disabled(
         self,
     ) -> None:
@@ -350,6 +382,7 @@ class ParseArgsTests(unittest.TestCase):
         self.assertFalse(args.enable_reasoning)
         self.assertEqual(args.reason_effect, "medium")
         self.assertEqual(args.workspace, Path("/tmp").resolve())
+        self.assertIsNone(args.output_file)
         self.assertEqual(args.permissions, "read-only")
 
     def test_accepts_disabled_stream_output(self) -> None:
@@ -363,6 +396,18 @@ class ParseArgsTests(unittest.TestCase):
         )
 
         self.assertFalse(args.enable_stream_output)
+
+    def test_accepts_custom_output_file(self) -> None:
+        args = main.parse_args(
+            [
+                "--question",
+                "test",
+                "--output-file",
+                "results/answer.txt",
+            ]
+        )
+
+        self.assertEqual(args.output_file, "results/answer.txt")
 
     def test_accepts_explicit_reasoning_effect_and_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -415,38 +460,129 @@ class ParseArgsTests(unittest.TestCase):
                 )
 
 
-class MainTests(unittest.TestCase):
-    def test_streams_to_stdout_by_default_without_duplicate_print(self) -> None:
-        stdout = StringIO()
+class TestPersistAgentOutput:
+    def test_uses_hashed_default_name_under_agents_directory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        output = "完整响应"
+        expected_hash = hashlib.sha256(output.encode("utf-8")).hexdigest()[:16]
+        output_path = main.persist_agent_output(output, workspace=tmp_path)
 
-        with (
-            patch("main.run_code_agent", new_callable=AsyncMock) as run_code_agent,
-            redirect_stdout(stdout),
-        ):
-            main.main(["--question", "test"])
+        assert output_path == (
+            tmp_path / ".agents" / f"response-{expected_hash}.txt"
+        )
+        assert output_path.read_text(encoding="utf-8") == output
 
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertIs(run_code_agent.await_args.kwargs["output_stream"], stdout)
+    def test_writes_custom_relative_path_inside_workspace(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        output_path = main.persist_agent_output(
+            "complete response",
+            workspace=tmp_path,
+            output_file="results/answer.txt",
+        )
 
-    def test_prints_complete_output_when_streaming_is_disabled(self) -> None:
-        stdout = StringIO()
+        assert output_path == tmp_path / "results" / "answer.txt"
+        assert output_path.read_text(encoding="utf-8") == "complete response"
 
-        with (
-            patch(
-                "main.run_code_agent",
-                new_callable=AsyncMock,
-                return_value="complete response",
-            ) as run_code_agent,
-            redirect_stdout(stdout),
-        ):
+    @pytest.mark.parametrize(
+        "output_file",
+        ["/tmp/answer.txt", "../answer.txt", "."],
+    )
+    def test_rejects_output_paths_outside_workspace(
+        self,
+        tmp_path: Path,
+        output_file: str,
+    ) -> None:
+        with pytest.raises(ValueError, match="workspace"):
+            main.persist_agent_output(
+                "response",
+                workspace=tmp_path,
+                output_file=output_file,
+            )
+
+    def test_rejects_symlink_that_escapes_workspace(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        outside_directory = tmp_path / "outside"
+        workspace.mkdir()
+        outside_directory.mkdir()
+        (workspace / "outside").symlink_to(outside_directory)
+
+        with pytest.raises(ValueError, match="workspace"):
+            main.persist_agent_output(
+                "response",
+                workspace=workspace,
+                output_file="outside/answer.txt",
+            )
+
+
+class TestMain:
+    def test_streams_to_stdout_and_prints_default_output_path(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        output = "complete response"
+        expected_hash = hashlib.sha256(output.encode("utf-8")).hexdigest()[:16]
+        expected_path = (
+            tmp_path / ".agents" / f"response-{expected_hash}.txt"
+        )
+        run_code_agent = AsyncMock(return_value=output)
+
+        with patch("main.run_code_agent", run_code_agent):
+            main.main(
+                [
+                    "--question",
+                    "test",
+                    "--workspace",
+                    str(tmp_path),
+                ]
+            )
+
+        assert capsys.readouterr().out == f"响应结果已保存到：{expected_path}\n"
+        assert expected_path.read_text(encoding="utf-8") == output
+        assert run_code_agent.await_args.kwargs["output_stream"] is not None
+
+    def test_prints_complete_output_and_custom_path_when_streaming_is_disabled(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        expected_path = tmp_path / "results" / "answer.txt"
+
+        async def fake_run_code_agent(**kwargs: object) -> str:
+            capture_stream = kwargs["capture_stream"]
+            capture_stream.write(
+                "[reasoning]\ncareful analysis\n[content]\ncomplete response\n"
+            )
+            return "complete response"
+
+        run_code_agent = AsyncMock(side_effect=fake_run_code_agent)
+
+        with patch("main.run_code_agent", run_code_agent):
             main.main(
                 [
                     "--question",
                     "test",
                     "--enable-stream-output",
                     "false",
+                    "--workspace",
+                    str(tmp_path),
+                    "--output-file",
+                    "results/answer.txt",
                 ]
             )
 
-        self.assertEqual(stdout.getvalue(), "complete response\n")
-        self.assertIsNone(run_code_agent.await_args.kwargs["output_stream"])
+        assert capsys.readouterr().out == (
+            "complete response\n"
+            f"响应结果已保存到：{expected_path}\n"
+        )
+        assert expected_path.read_text(encoding="utf-8") == (
+            "[reasoning]\ncareful analysis\n[content]\ncomplete response\n"
+        )
+        assert run_code_agent.await_args.kwargs["output_stream"] is None

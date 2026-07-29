@@ -6,6 +6,8 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
+import hashlib
+from io import StringIO
 import os
 from pathlib import Path
 import shlex
@@ -290,8 +292,9 @@ async def run_code_agent(
     workspace: str | Path | None = None,
     permissions: str | AgentPermissions = "read-only",
     output_stream: TextIO | None = None,
+    capture_stream: TextIO | None = None,
 ) -> str:
-    """Run the Code Agent, optionally stream deltas, and return its final output."""
+    """Run the Agent, optionally display and capture deltas, and return final output."""
     workspace_path = _resolve_workspace(workspace)
     permission_profile = _resolve_permissions(permissions)
     if enable_reasoning and reason_effect not in REASON_EFFECTS:
@@ -330,6 +333,21 @@ async def run_code_agent(
     active_section: str | None = None
     wrote_output = False
     last_chunk_ends_with_newline = False
+    response_streams = [
+        stream
+        for stream in (output_stream, capture_stream)
+        if stream is not None
+    ]
+    if (
+        len(response_streams) == 2
+        and response_streams[0] is response_streams[1]
+    ):
+        response_streams.pop()
+
+    def write_response(text: str) -> None:
+        for stream in response_streams:
+            stream.write(text)
+            stream.flush()
 
     async for event in result.stream_events():
         if event.type != "raw_response_event":
@@ -349,23 +367,21 @@ async def run_code_agent(
 
         if section == "reasoning" and not enable_reasoning:
             continue
-        if section is None or output_stream is None or not event.data.delta:
+        if section is None or not response_streams or not event.data.delta:
             continue
 
         if enable_reasoning and section != active_section:
             if wrote_output and not last_chunk_ends_with_newline:
-                output_stream.write("\n")
-            output_stream.write(f"[{section}]\n")
+                write_response("\n")
+            write_response(f"[{section}]\n")
             active_section = section
 
-        output_stream.write(event.data.delta)
-        output_stream.flush()
+        write_response(event.data.delta)
         wrote_output = True
         last_chunk_ends_with_newline = event.data.delta.endswith("\n")
 
-    if output_stream is not None and wrote_output and not last_chunk_ends_with_newline:
-        output_stream.write("\n")
-        output_stream.flush()
+    if response_streams and wrote_output and not last_chunk_ends_with_newline:
+        write_response("\n")
 
     return str(result.final_output)
 
@@ -386,6 +402,45 @@ def _workspace_argument(value: str) -> Path:
         return _resolve_workspace(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _resolve_output_file(
+    output: str,
+    *,
+    workspace: str | Path | None = None,
+    output_file: str | Path | None = None,
+) -> Path:
+    """Return a safe absolute output path inside the workspace."""
+    workspace_path = _resolve_workspace(workspace)
+    if output_file is None:
+        response_hash = hashlib.sha256(output.encode("utf-8")).hexdigest()[:16]
+        relative_path = Path(".agents") / f"response-{response_hash}.txt"
+    else:
+        relative_path = Path(output_file).expanduser()
+        if relative_path.is_absolute():
+            raise ValueError("output-file 必须是 workspace 内的相对路径。")
+
+    output_path = (workspace_path / relative_path).resolve()
+    if output_path == workspace_path or not output_path.is_relative_to(workspace_path):
+        raise ValueError("output-file 必须指向 workspace 内的文件。")
+    return output_path
+
+
+def persist_agent_output(
+    output: str,
+    *,
+    workspace: str | Path | None = None,
+    output_file: str | Path | None = None,
+) -> Path:
+    """Persist the final Agent output and return its absolute path."""
+    output_path = _resolve_output_file(
+        output,
+        workspace=workspace,
+        output_file=output_file,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(output, encoding="utf-8")
+    return output_path
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -447,6 +502,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Agent 工作目录；省略时使用启动脚本时的当前目录。",
     )
     parser.add_argument(
+        "--output-file",
+        default=None,
+        help=(
+            "最终响应在 workspace 内的保存路径；省略时保存为 "
+            ".agents/response-<响应哈希>.txt。"
+        ),
+    )
+    parser.add_argument(
         "--permissions",
         choices=tuple(PERMISSION_PROFILES),
         default="read-only",
@@ -463,6 +526,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     """Run the command-line application."""
     args = parse_args(argv)
+    captured_response = StringIO()
     output = asyncio.run(
         run_code_agent(
             question=args.question,
@@ -474,10 +538,18 @@ def main(argv: Sequence[str] | None = None) -> None:
             workspace=args.workspace,
             permissions=args.permissions,
             output_stream=sys.stdout if args.enable_stream_output else None,
+            capture_stream=captured_response,
         )
+    )
+    persisted_output = captured_response.getvalue() or output
+    output_path = persist_agent_output(
+        persisted_output,
+        workspace=args.workspace,
+        output_file=args.output_file,
     )
     if not args.enable_stream_output:
         print(output)
+    print(f"响应结果已保存到：{output_path}")
 
 
 if __name__ == "__main__":
