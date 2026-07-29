@@ -12,7 +12,7 @@ import main
 def make_shell_request(*command: str) -> SimpleNamespace:
     """Create the portion of an SDK shell request used by the executor."""
     return SimpleNamespace(
-        data=SimpleNamespace(action=SimpleNamespace(command=list(command)))
+        data=SimpleNamespace(action=SimpleNamespace(commands=list(command)))
     )
 
 
@@ -35,6 +35,7 @@ class ValidateReadOnlyCommandTests(unittest.TestCase):
             ("find", ".", "-delete"),
             ("rg", "--pre", "formatter", "pattern"),
             ("git", "--git-dir=/tmp/other", "status"),
+            ("pwd", "&&", "ls"),
         ):
             with self.subTest(command=command):
                 self.assertIsNotNone(main._validate_read_only_command(command))
@@ -50,10 +51,19 @@ class ReadOnlyShellExecutorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output.strip(), str(main.PROJECT_ROOT))
 
+    async def test_executes_an_allowlisted_and_chain_without_a_shell(self) -> None:
+        output = await main.execute_read_only_shell(
+            make_shell_request("pwd && ls -1p")
+        )
+
+        self.assertIn(str(main.PROJECT_ROOT), output)
+        self.assertIn("main.py", output)
+        self.assertIn("tests/", output)
+
     async def test_rejects_command_without_starting_a_process(self) -> None:
         with patch("main.asyncio.create_subprocess_exec", new_callable=AsyncMock) as execute:
             output = await main.execute_read_only_shell(
-                make_shell_request("rm", "important-file")
+                make_shell_request("rm important-file")
             )
 
         self.assertIn("不在只读命令白名单", output)
@@ -74,4 +84,4 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output, "done")
         agent = captured["agent"]
-        self.assertTrue(any(tool.name == "local_shell" for tool in agent.tools))
+        self.assertTrue(any(tool.name == "shell" for tool in agent.tools))
