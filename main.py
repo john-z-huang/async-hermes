@@ -5,8 +5,36 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Sequence
+import os
+from pathlib import Path
 
-from agents import Agent, Runner
+from agents import Agent, LocalShellCommandRequest, LocalShellTool, Runner
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+READ_ONLY_COMMANDS = frozenset({"cat", "find", "git", "head", "ls", "pwd", "rg", "tail", "wc"})
+READ_ONLY_GIT_SUBCOMMANDS = frozenset(
+    {"branch", "diff", "grep", "log", "ls-files", "rev-parse", "show", "status"}
+)
+FORBIDDEN_ARGUMENTS = frozenset(
+    {
+        "--exec",
+        "--execdir",
+        "--in-place",
+        "--ok",
+        "--okdir",
+        "--pre",
+        "--git-dir",
+        "--work-tree",
+        "--write",
+        "-delete",
+        "-exec",
+        "-execdir",
+        "-i",
+        "-ok",
+        "-okdir",
+    }
+)
+FORBIDDEN_ARGUMENT_PREFIXES = ("--config=", "--git-dir=", "--pre=", "--work-tree=")
 
 SYSTEM_PROMPT = """\
 You are a general-purpose Code Agent. Complete the user's task accurately and
@@ -15,6 +43,11 @@ assumptions explicit, and provide code or commands when they are useful.
 Prefer simple, maintainable solutions and mention important limitations or
 verification steps. Never claim that you ran code, accessed files, or used a
 tool unless that capability was actually provided and used.
+
+You may use the shell to inspect the project. The shell is read-only: use it
+only to discover files or read their contents, and do not attempt to modify
+files, install dependencies, change Git state, or access paths outside the
+project.
 """
 
 USER_PROMPT = """\
@@ -42,6 +75,52 @@ def build_task_input(
     return "\n\n".join(sections)
 
 
+def _validate_read_only_command(command: Sequence[str]) -> str | None:
+    """Return an error message when a shell command exceeds read-only access."""
+    if not command:
+        return "拒绝执行：未提供命令。"
+
+    executable, *arguments = command
+    if executable not in READ_ONLY_COMMANDS:
+        return f"拒绝执行：{executable!r} 不在只读命令白名单中。"
+    if any(argument in FORBIDDEN_ARGUMENTS for argument in arguments):
+        return "拒绝执行：命令包含可能修改文件或执行其他命令的参数。"
+    if any(argument.startswith(FORBIDDEN_ARGUMENT_PREFIXES) for argument in arguments):
+        return "拒绝执行：命令包含不允许的配置或执行参数。"
+    for argument in arguments:
+        if argument == ".." or argument.startswith("../"):
+            return "拒绝执行：只允许访问项目目录内的路径。"
+        if argument.startswith("/") and not Path(argument).resolve().is_relative_to(PROJECT_ROOT):
+            return "拒绝执行：只允许访问项目目录内的路径。"
+    if executable == "git":
+        subcommand = next((argument for argument in arguments if not argument.startswith("-")), None)
+        if subcommand not in READ_ONLY_GIT_SUBCOMMANDS:
+            return "拒绝执行：只允许只读 Git 子命令。"
+    return None
+
+
+async def execute_read_only_shell(request: LocalShellCommandRequest) -> str:
+    """Execute an allowlisted read-only shell command inside the project root."""
+    action = request.data.action
+    command = action.command
+    error = _validate_read_only_command(command)
+    if error:
+        return error
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=PROJECT_ROOT,
+        # Preserve only PATH so Homebrew-provided read tools (such as rg) remain
+        # available without exposing credentials or other process environment.
+        env={"PATH": os.environ.get("PATH", os.defpath)},
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    output = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+    return output or f"命令已执行，退出码为 {process.returncode}。"
+
+
 async def run_code_agent(
     question: str,
     system_prompt: str = SYSTEM_PROMPT,
@@ -57,6 +136,7 @@ async def run_code_agent(
     agent = Agent(
         name="Code Agent",
         instructions=system_prompt,
+        tools=[LocalShellTool(executor=execute_read_only_shell)],
     )
     result = await Runner.run(agent, task_input)
     return str(result.final_output)
