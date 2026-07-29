@@ -10,6 +10,8 @@ from functools import partial
 import os
 from pathlib import Path
 import shlex
+import sys
+from typing import TextIO
 from urllib.parse import urlparse
 
 from agents import (
@@ -19,6 +21,11 @@ from agents import (
     ShellCommandRequest,
     ShellTool,
     set_tracing_disabled,
+)
+from openai.types.responses import (
+    ResponseReasoningSummaryTextDeltaEvent,
+    ResponseReasoningTextDeltaEvent,
+    ResponseTextDeltaEvent,
 )
 from openai.types.shared import Reasoning
 
@@ -249,8 +256,9 @@ async def run_code_agent(
     reason_effect: str = DEFAULT_REASON_EFFECT,
     workspace: str | Path | None = None,
     permissions: str | AgentPermissions = "read-only",
+    output_stream: TextIO | None = None,
 ) -> str:
-    """Run the Code Agent once and return its final output."""
+    """Run the Code Agent, optionally stream deltas, and return its final output."""
     workspace_path = _resolve_workspace(workspace)
     permission_profile = _resolve_permissions(permissions)
     if enable_reasoning and reason_effect not in REASON_EFFECTS:
@@ -288,7 +296,45 @@ async def run_code_agent(
             )
         ],
     )
-    result = await Runner.run(agent, task_input)
+    result = Runner.run_streamed(agent, task_input)
+    active_section: str | None = None
+    wrote_output = False
+    last_chunk_ends_with_newline = False
+
+    async for event in result.stream_events():
+        if event.type != "raw_response_event":
+            continue
+
+        section: str | None = None
+        if isinstance(event.data, ResponseTextDeltaEvent):
+            section = "content"
+        elif enable_reasoning and isinstance(
+            event.data,
+            (
+                ResponseReasoningTextDeltaEvent,
+                ResponseReasoningSummaryTextDeltaEvent,
+            ),
+        ):
+            section = "reasoning"
+
+        if section is None or output_stream is None or not event.data.delta:
+            continue
+
+        if enable_reasoning and section != active_section:
+            if wrote_output and not last_chunk_ends_with_newline:
+                output_stream.write("\n")
+            output_stream.write(f"[{section}]\n")
+            active_section = section
+
+        output_stream.write(event.data.delta)
+        output_stream.flush()
+        wrote_output = True
+        last_chunk_ends_with_newline = event.data.delta.endswith("\n")
+
+    if output_stream is not None and wrote_output and not last_chunk_ends_with_newline:
+        output_stream.write("\n")
+        output_stream.flush()
+
     return str(result.final_output)
 
 
@@ -334,6 +380,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--content",
         default="",
         help="可选的补充信息、上一步结果或中间信息。",
+    )
+    parser.add_argument(
+        "--enable-stream-output",
+        nargs="?",
+        const=True,
+        type=_parse_boolean,
+        default=True,
+        help=(
+            "是否实时输出 Agent 响应，可传 true/false；"
+            "设为 false 时在响应结束后一次性输出（默认 true）。"
+        ),
     )
     parser.add_argument(
         "--enable-reasoning",
@@ -384,9 +441,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             reason_effect=args.reason_effect,
             workspace=args.workspace,
             permissions=args.permissions,
+            output_stream=sys.stdout if args.enable_stream_output else None,
         )
     )
-    print(output)
+    if not args.enable_stream_output:
+        print(output)
 
 
 if __name__ == "__main__":

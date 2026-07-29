@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 import tempfile
@@ -11,6 +11,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import main
+from openai.types.responses import (
+    ResponseReasoningSummaryTextDeltaEvent,
+    ResponseTextDeltaEvent,
+)
 
 
 def make_shell_request(*command: str) -> SimpleNamespace:
@@ -18,6 +22,27 @@ def make_shell_request(*command: str) -> SimpleNamespace:
     return SimpleNamespace(
         data=SimpleNamespace(action=SimpleNamespace(commands=list(command)))
     )
+
+
+def make_stream_result(
+    *events: object,
+    final_output: str = "done",
+) -> SimpleNamespace:
+    """Create the portion of a streamed SDK result used by the runner tests."""
+
+    async def stream_events():
+        for event in events:
+            yield event
+
+    return SimpleNamespace(
+        final_output=final_output,
+        stream_events=stream_events,
+    )
+
+
+def make_raw_response_event(data: object) -> SimpleNamespace:
+    """Wrap an OpenAI response event as an Agents SDK raw stream event."""
+    return SimpleNamespace(type="raw_response_event", data=data)
 
 
 class ValidateReadOnlyCommandTests(unittest.TestCase):
@@ -112,12 +137,12 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_registers_read_only_shell_tool(self) -> None:
         captured: dict[str, object] = {}
 
-        async def fake_run(agent: object, task_input: str) -> SimpleNamespace:
+        def fake_run(agent: object, task_input: str) -> SimpleNamespace:
             captured["agent"] = agent
             captured["task_input"] = task_input
-            return SimpleNamespace(final_output="done")
+            return make_stream_result()
 
-        with patch.object(main.Runner, "run", new=AsyncMock(side_effect=fake_run)):
+        with patch.object(main.Runner, "run_streamed", side_effect=fake_run):
             output = await main.run_code_agent("List the project files")
 
         self.assertEqual(output, "done")
@@ -128,11 +153,11 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_enables_default_reasoning_effect_when_requested(self) -> None:
         captured: dict[str, object] = {}
 
-        async def fake_run(agent: object, task_input: str) -> SimpleNamespace:
+        def fake_run(agent: object, task_input: str) -> SimpleNamespace:
             captured["agent"] = agent
-            return SimpleNamespace(final_output="done")
+            return make_stream_result()
 
-        with patch.object(main.Runner, "run", new=AsyncMock(side_effect=fake_run)):
+        with patch.object(main.Runner, "run_streamed", side_effect=fake_run):
             await main.run_code_agent("Think carefully", enable_reasoning=True)
 
         agent = captured["agent"]
@@ -141,11 +166,11 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_requested_reasoning_effect(self) -> None:
         captured: dict[str, object] = {}
 
-        async def fake_run(agent: object, task_input: str) -> SimpleNamespace:
+        def fake_run(agent: object, task_input: str) -> SimpleNamespace:
             captured["agent"] = agent
-            return SimpleNamespace(final_output="done")
+            return make_stream_result()
 
-        with patch.object(main.Runner, "run", new=AsyncMock(side_effect=fake_run)):
+        with patch.object(main.Runner, "run_streamed", side_effect=fake_run):
             await main.run_code_agent(
                 "Think very carefully",
                 enable_reasoning=True,
@@ -158,11 +183,11 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_ignores_reason_effect_when_reasoning_is_disabled(self) -> None:
         captured: dict[str, object] = {}
 
-        async def fake_run(agent: object, task_input: str) -> SimpleNamespace:
+        def fake_run(agent: object, task_input: str) -> SimpleNamespace:
             captured["agent"] = agent
-            return SimpleNamespace(final_output="done")
+            return make_stream_result()
 
-        with patch.object(main.Runner, "run", new=AsyncMock(side_effect=fake_run)):
+        with patch.object(main.Runner, "run_streamed", side_effect=fake_run):
             await main.run_code_agent(
                 "Do not reason",
                 enable_reasoning=False,
@@ -171,6 +196,68 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
 
         agent = captured["agent"]
         self.assertEqual(agent.model_settings.reasoning.effort, "none")
+
+    async def test_streams_content_deltas_and_returns_final_output(self) -> None:
+        stream = StringIO()
+        result = make_stream_result(
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta="hel")
+            ),
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta="lo")
+            ),
+            final_output="hello",
+        )
+
+        with patch.object(main.Runner, "run_streamed", return_value=result):
+            output = await main.run_code_agent("Say hello", output_stream=stream)
+
+        self.assertEqual(output, "hello")
+        self.assertEqual(stream.getvalue(), "hello\n")
+
+    async def test_labels_reasoning_and_content_streams(self) -> None:
+        stream = StringIO()
+        result = make_stream_result(
+            make_raw_response_event(
+                ResponseReasoningSummaryTextDeltaEvent.model_construct(
+                    delta="thinking"
+                )
+            ),
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta="answer")
+            ),
+            final_output="answer",
+        )
+
+        with patch.object(main.Runner, "run_streamed", return_value=result):
+            await main.run_code_agent(
+                "Think",
+                enable_reasoning=True,
+                output_stream=stream,
+            )
+
+        self.assertEqual(
+            stream.getvalue(),
+            "[reasoning]\nthinking\n[content]\nanswer\n",
+        )
+
+    async def test_does_not_emit_reasoning_when_disabled(self) -> None:
+        stream = StringIO()
+        result = make_stream_result(
+            make_raw_response_event(
+                ResponseReasoningSummaryTextDeltaEvent.model_construct(
+                    delta="hidden"
+                )
+            ),
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta="answer")
+            ),
+        )
+
+        with patch.object(main.Runner, "run_streamed", return_value=result):
+            await main.run_code_agent("Answer", output_stream=stream)
+
+        self.assertEqual(stream.getvalue(), "answer\n")
 
     async def test_rejects_unknown_effect_when_reasoning_is_enabled(self) -> None:
         with self.assertRaisesRegex(ValueError, "未知 reason-effect"):
@@ -186,10 +273,23 @@ class ParseArgsTests(unittest.TestCase):
         with patch("main.Path.cwd", return_value=Path("/tmp")):
             args = main.parse_args(["--question", "test"])
 
+        self.assertTrue(args.enable_stream_output)
         self.assertFalse(args.enable_reasoning)
         self.assertEqual(args.reason_effect, "medium")
         self.assertEqual(args.workspace, Path("/tmp").resolve())
         self.assertEqual(args.permissions, "read-only")
+
+    def test_accepts_disabled_stream_output(self) -> None:
+        args = main.parse_args(
+            [
+                "--question",
+                "test",
+                "--enable-stream-output",
+                "false",
+            ]
+        )
+
+        self.assertFalse(args.enable_stream_output)
 
     def test_accepts_explicit_reasoning_effect_and_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -240,3 +340,40 @@ class ParseArgsTests(unittest.TestCase):
                         "unsupported",
                     ]
                 )
+
+
+class MainTests(unittest.TestCase):
+    def test_streams_to_stdout_by_default_without_duplicate_print(self) -> None:
+        stdout = StringIO()
+
+        with (
+            patch("main.run_code_agent", new_callable=AsyncMock) as run_code_agent,
+            redirect_stdout(stdout),
+        ):
+            main.main(["--question", "test"])
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIs(run_code_agent.await_args.kwargs["output_stream"], stdout)
+
+    def test_prints_complete_output_when_streaming_is_disabled(self) -> None:
+        stdout = StringIO()
+
+        with (
+            patch(
+                "main.run_code_agent",
+                new_callable=AsyncMock,
+                return_value="complete response",
+            ) as run_code_agent,
+            redirect_stdout(stdout),
+        ):
+            main.main(
+                [
+                    "--question",
+                    "test",
+                    "--enable-stream-output",
+                    "false",
+                ]
+            )
+
+        self.assertEqual(stdout.getvalue(), "complete response\n")
+        self.assertIsNone(run_code_agent.await_args.kwargs["output_stream"])
