@@ -241,7 +241,9 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
             "[reasoning]\nthinking\n[content]\nanswer\n",
         )
 
-    async def test_does_not_emit_reasoning_when_disabled(self) -> None:
+    async def test_does_not_distinguish_streams_when_reasoning_is_disabled(
+        self,
+    ) -> None:
         stream = StringIO()
         result = make_stream_result(
             make_raw_response_event(
@@ -257,7 +259,7 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main.Runner, "run_streamed", return_value=result):
             await main.run_code_agent("Answer", output_stream=stream)
 
-        self.assertEqual(stream.getvalue(), "answer\n")
+        self.assertEqual(stream.getvalue(), "hiddenanswer\n")
 
     async def test_rejects_unknown_effect_when_reasoning_is_enabled(self) -> None:
         with self.assertRaisesRegex(ValueError, "未知 reason-effect"):

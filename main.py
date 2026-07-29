@@ -308,7 +308,7 @@ async def run_code_agent(
         section: str | None = None
         if isinstance(event.data, ResponseTextDeltaEvent):
             section = "content"
-        elif enable_reasoning and isinstance(
+        elif isinstance(
             event.data,
             (
                 ResponseReasoningTextDeltaEvent,
