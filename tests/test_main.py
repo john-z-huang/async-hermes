@@ -11,17 +11,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import main
+from agents import FunctionTool
+from agents.tool_context import ToolContext
 from openai.types.responses import (
+    ResponseFunctionCallArgumentsDeltaEvent,
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseTextDeltaEvent,
 )
-
-
-def make_shell_request(*command: str) -> SimpleNamespace:
-    """Create the portion of an SDK shell request used by the executor."""
-    return SimpleNamespace(
-        data=SimpleNamespace(action=SimpleNamespace(commands=list(command)))
-    )
 
 
 def make_stream_result(
@@ -107,7 +103,7 @@ class ValidateReadOnlyCommandTests(unittest.TestCase):
 
 class ReadOnlyShellExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_executes_an_allowed_command_in_the_current_directory(self) -> None:
-        output = await main.execute_read_only_shell(make_shell_request("pwd"))
+        output = await main.execute_read_only_shell(["pwd"])
 
         self.assertEqual(output.strip(), str(Path.cwd().resolve()))
 
@@ -116,7 +112,7 @@ class ReadOnlyShellExecutorTests(unittest.IsolatedAsyncioTestCase):
             workspace = Path(temporary_directory)
             (workspace / "example.txt").touch()
             output = await main.execute_read_only_shell(
-                make_shell_request("pwd && ls -1p"),
+                ["pwd && ls -1p"],
                 workspace=workspace,
             )
 
@@ -126,15 +122,84 @@ class ReadOnlyShellExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_command_without_starting_a_process(self) -> None:
         with patch("main.asyncio.create_subprocess_exec", new_callable=AsyncMock) as execute:
             output = await main.execute_read_only_shell(
-                make_shell_request("rm important-file")
+                ["rm important-file"]
             )
 
         self.assertIn("不在只读命令白名单", output)
         execute.assert_not_awaited()
 
 
+class ReadOnlyWorkspaceFunctionToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exposes_a_strict_function_call_schema(self) -> None:
+        tool = main.build_read_only_workspace_tool()
+
+        self.assertIsInstance(tool, FunctionTool)
+        self.assertEqual(tool.name, "inspect_workspace")
+        self.assertTrue(tool.strict_json_schema)
+        self.assertEqual(tool.params_json_schema["required"], ["commands"])
+        self.assertFalse(tool.params_json_schema["additionalProperties"])
+        self.assertEqual(
+            tool.params_json_schema["properties"]["commands"]["items"]["type"],
+            "string",
+        )
+        self.assertIn(
+            "read-only",
+            tool.params_json_schema["properties"]["commands"]["description"],
+        )
+
+    async def test_invokes_the_shared_read_only_executor(self) -> None:
+        tool = main.build_read_only_workspace_tool()
+        arguments = '{"commands":["pwd","ls -1p"]}'
+        context = ToolContext(
+            context=None,
+            tool_name=tool.name,
+            tool_call_id="call-1",
+            tool_arguments=arguments,
+        )
+
+        with patch(
+            "main.execute_read_only_shell",
+            new_callable=AsyncMock,
+            return_value="project files",
+        ) as execute:
+            output = await tool.on_invoke_tool(
+                context,
+                arguments,
+            )
+
+        self.assertEqual(output, "project files")
+        execute.assert_awaited_once_with(
+            ["pwd", "ls -1p"],
+            workspace=Path.cwd().resolve(),
+            permissions=main.DEFAULT_AGENT_PERMISSIONS,
+        )
+
+    async def test_does_not_parse_tool_tags_from_model_text(self) -> None:
+        stream = StringIO()
+        text = '<tool_call>{"commands":["pwd"]}</tool_call>'
+        result = make_stream_result(
+            make_raw_response_event(
+                ResponseTextDeltaEvent.model_construct(delta=text)
+            ),
+            final_output=text,
+        )
+
+        with (
+            patch.object(main.Runner, "run_streamed", return_value=result),
+            patch(
+                "main.execute_read_only_shell",
+                new_callable=AsyncMock,
+            ) as execute,
+        ):
+            output = await main.run_code_agent("Inspect", output_stream=stream)
+
+        self.assertEqual(output, text)
+        self.assertEqual(stream.getvalue(), f"{text}\n")
+        execute.assert_not_awaited()
+
+
 class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_registers_read_only_shell_tool(self) -> None:
+    async def test_registers_structured_read_only_function_tool(self) -> None:
         captured: dict[str, object] = {}
 
         def fake_run(agent: object, task_input: str) -> SimpleNamespace:
@@ -147,7 +212,8 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output, "done")
         agent = captured["agent"]
-        self.assertTrue(any(tool.name == "shell" for tool in agent.tools))
+        self.assertEqual([tool.name for tool in agent.tools], ["inspect_workspace"])
+        self.assertIsInstance(agent.tools[0], FunctionTool)
         self.assertEqual(agent.model_settings.reasoning.effort, "none")
 
     async def test_enables_default_reasoning_effect_when_requested(self) -> None:
@@ -224,6 +290,11 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
             make_raw_response_event(
+                ResponseFunctionCallArgumentsDeltaEvent.model_construct(
+                    delta='{"commands":["pwd"]}'
+                )
+            ),
+            make_raw_response_event(
                 ResponseTextDeltaEvent.model_construct(delta="answer")
             ),
             final_output="answer",
@@ -241,7 +312,7 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
             "[reasoning]\nthinking\n[content]\nanswer\n",
         )
 
-    async def test_does_not_distinguish_streams_when_reasoning_is_disabled(
+    async def test_hides_reasoning_stream_when_reasoning_is_disabled(
         self,
     ) -> None:
         stream = StringIO()
@@ -259,7 +330,7 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main.Runner, "run_streamed", return_value=result):
             await main.run_code_agent("Answer", output_stream=stream)
 
-        self.assertEqual(stream.getvalue(), "hiddenanswer\n")
+        self.assertEqual(stream.getvalue(), "answer\n")
 
     async def test_rejects_unknown_effect_when_reasoning_is_enabled(self) -> None:
         with self.assertRaisesRegex(ValueError, "未知 reason-effect"):

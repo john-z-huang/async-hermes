@@ -6,7 +6,6 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import partial
 import os
 from pathlib import Path
 import shlex
@@ -16,10 +15,10 @@ from urllib.parse import urlparse
 
 from agents import (
     Agent,
+    FunctionTool,
     ModelSettings,
     Runner,
-    ShellCommandRequest,
-    ShellTool,
+    function_tool,
     set_tracing_disabled,
 )
 from openai.types.responses import (
@@ -90,12 +89,14 @@ Prefer simple, maintainable solutions and mention important limitations or
 verification steps. Never claim that you ran code, accessed files, or used a
 tool unless that capability was actually provided and used.
 
-You may use the shell to inspect the workspace. The shell is read-only: use it
-only to discover files or read their contents, and do not attempt to modify
-files, install dependencies, change Git state, or access paths outside the
-workspace. Invoke only one direct command per shell command, without pipes,
-redirections, command chaining, or helper commands such as printf. The allowed
-commands are: cat, find, git, head, ls, pwd, rg, tail, and wc.
+You may call the inspect_workspace function to inspect the workspace. It is
+read-only: use it only to discover files or read their contents, and do not
+attempt to modify files, install dependencies, change Git state, or access
+paths outside the workspace. Pass one or more direct commands in its commands
+array, without pipes, redirections, command chaining, or helper commands such
+as printf. Use a structured function call; never print or serialize a tool call
+such as <tool_call> in ordinary response text. The allowed commands are: cat,
+find, git, head, ls, pwd, rg, tail, and wc.
 When you need to distinguish files from directories, use `ls -1p` so directory
 names have a trailing slash.
 """
@@ -191,7 +192,7 @@ def _validate_read_only_command(
 
 
 async def execute_read_only_shell(
-    request: ShellCommandRequest,
+    commands: Sequence[str],
     *,
     workspace: str | Path | None = None,
     permissions: AgentPermissions = DEFAULT_AGENT_PERMISSIONS,
@@ -199,7 +200,7 @@ async def execute_read_only_shell(
     """Execute allowlisted read-only shell commands inside the workspace."""
     workspace_path = _resolve_workspace(workspace)
     outputs: list[str] = []
-    for command_text in request.data.action.commands:
+    for command_text in commands:
         try:
             tokens = shlex.split(command_text)
         except ValueError as error:
@@ -247,6 +248,38 @@ async def execute_read_only_shell(
     return "\n".join(outputs)
 
 
+def build_read_only_workspace_tool(
+    *,
+    workspace: str | Path | None = None,
+    permissions: AgentPermissions = DEFAULT_AGENT_PERMISSIONS,
+) -> FunctionTool:
+    """Build a structured function tool for safe workspace inspection."""
+    workspace_path = _resolve_workspace(workspace)
+
+    @function_tool(
+        name_override="inspect_workspace",
+        description_override=(
+            "Execute one or more allowlisted, read-only commands inside the "
+            "workspace and return their combined output. Each item must be a "
+            "direct command without pipes, redirection, or shell expansion."
+        ),
+        strict_mode=True,
+    )
+    async def inspect_workspace(commands: list[str]) -> str:
+        """Inspect files and Git metadata in the configured workspace.
+
+        Args:
+            commands: Direct read-only commands to execute in order.
+        """
+        return await execute_read_only_shell(
+            commands,
+            workspace=workspace_path,
+            permissions=permissions,
+        )
+
+    return inspect_workspace
+
+
 async def run_code_agent(
     question: str,
     system_prompt: str = SYSTEM_PROMPT,
@@ -287,12 +320,9 @@ async def run_code_agent(
             else Reasoning(effort="none")
         ),
         tools=[
-            ShellTool(
-                executor=partial(
-                    execute_read_only_shell,
-                    workspace=workspace_path,
-                    permissions=permission_profile,
-                )
+            build_read_only_workspace_tool(
+                workspace=workspace_path,
+                permissions=permission_profile,
             )
         ],
     )
@@ -317,6 +347,8 @@ async def run_code_agent(
         ):
             section = "reasoning"
 
+        if section == "reasoning" and not enable_reasoning:
+            continue
         if section is None or output_stream is None or not event.data.delta:
             continue
 
