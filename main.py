@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import shlex
 import sys
-from typing import TextIO
+from typing import Literal, TextIO, TypeGuard
 from urllib.parse import urlparse
 
 from agents import (
@@ -80,8 +80,16 @@ DEFAULT_AGENT_PERMISSIONS = AgentPermissions(
     ),
 )
 PERMISSION_PROFILES = {"read-only": DEFAULT_AGENT_PERMISSIONS}
-REASON_EFFECTS = ("minimal", "low", "medium", "high", "xhigh", "max")
-DEFAULT_REASON_EFFECT = "medium"
+ReasonEffect = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+REASON_EFFECTS: tuple[ReasonEffect, ...] = (
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+DEFAULT_REASON_EFFECT: ReasonEffect = "medium"
 
 SYSTEM_PROMPT = """\
 You are a general-purpose Code Agent. Complete the user's task accurately and
@@ -108,6 +116,11 @@ Complete the task in the question below. Use the additional context when it is
 relevant. Return the final result together with only the explanation needed to
 understand or use it.
 """
+
+
+def _is_reason_effect(value: str) -> TypeGuard[ReasonEffect]:
+    """Return whether a string is a supported reasoning effort."""
+    return value in REASON_EFFECTS
 
 
 def build_task_input(
@@ -297,11 +310,15 @@ async def run_code_agent(
     """Run the Agent, optionally display and capture deltas, and return final output."""
     workspace_path = _resolve_workspace(workspace)
     permission_profile = _resolve_permissions(permissions)
-    if enable_reasoning and reason_effect not in REASON_EFFECTS:
-        available = ", ".join(REASON_EFFECTS)
-        raise ValueError(
-            f"未知 reason-effect 值 {reason_effect!r}；当前可用值：{available}"
-        )
+    if enable_reasoning:
+        if not _is_reason_effect(reason_effect):
+            available = ", ".join(REASON_EFFECTS)
+            raise ValueError(
+                f"未知 reason-effect 值 {reason_effect!r}；当前可用值：{available}"
+            )
+        reasoning = Reasoning(effort=reason_effect)
+    else:
+        reasoning = Reasoning(effort="none")
 
     # The Agents SDK exports traces to OpenAI separately from model requests.
     # A key for an OpenAI-compatible provider cannot authenticate that export.
@@ -318,9 +335,7 @@ async def run_code_agent(
         name="Code Agent",
         instructions=system_prompt,
         model_settings=ModelSettings(
-            reasoning=Reasoning(effort=reason_effect)
-            if enable_reasoning
-            else Reasoning(effort="none")
+            reasoning=reasoning,
         ),
         tools=[
             build_read_only_workspace_tool(
@@ -334,14 +349,9 @@ async def run_code_agent(
     wrote_output = False
     last_chunk_ends_with_newline = False
     response_streams = [
-        stream
-        for stream in (output_stream, capture_stream)
-        if stream is not None
+        stream for stream in (output_stream, capture_stream) if stream is not None
     ]
-    if (
-        len(response_streams) == 2
-        and response_streams[0] is response_streams[1]
-    ):
+    if len(response_streams) == 2 and response_streams[0] is response_streams[1]:
         response_streams.pop()
 
     def write_response(text: str) -> None:
@@ -353,21 +363,24 @@ async def run_code_agent(
         if event.type != "raw_response_event":
             continue
 
-        section: str | None = None
-        if isinstance(event.data, ResponseTextDeltaEvent):
+        data = event.data
+        if isinstance(data, ResponseTextDeltaEvent):
             section = "content"
         elif isinstance(
-            event.data,
+            data,
             (
                 ResponseReasoningTextDeltaEvent,
                 ResponseReasoningSummaryTextDeltaEvent,
             ),
         ):
             section = "reasoning"
+        else:
+            continue
 
         if section == "reasoning" and not enable_reasoning:
             continue
-        if section is None or not response_streams or not event.data.delta:
+        delta = data.delta
+        if not response_streams or not delta:
             continue
 
         if enable_reasoning and section != active_section:
@@ -376,9 +389,9 @@ async def run_code_agent(
             write_response(f"[{section}]\n")
             active_section = section
 
-        write_response(event.data.delta)
+        write_response(delta)
         wrote_output = True
-        last_chunk_ends_with_newline = event.data.delta.endswith("\n")
+        last_chunk_ends_with_newline = delta.endswith("\n")
 
     if response_streams and wrote_output and not last_chunk_ends_with_newline:
         write_response("\n")
@@ -517,9 +530,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     if args.enable_reasoning and args.reason_effect not in REASON_EFFECTS:
-        parser.error(
-            f"--reason-effect 必须是以下值之一：{', '.join(REASON_EFFECTS)}"
-        )
+        parser.error(f"--reason-effect 必须是以下值之一：{', '.join(REASON_EFFECTS)}")
     return args
 
 
