@@ -6,19 +6,27 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import partial
+import hashlib
+from io import StringIO
 import os
 from pathlib import Path
 import shlex
+import sys
+from typing import TextIO
 from urllib.parse import urlparse
 
 from agents import (
     Agent,
+    FunctionTool,
     ModelSettings,
     Runner,
-    ShellCommandRequest,
-    ShellTool,
+    function_tool,
     set_tracing_disabled,
+)
+from openai.types.responses import (
+    ResponseReasoningSummaryTextDeltaEvent,
+    ResponseReasoningTextDeltaEvent,
+    ResponseTextDeltaEvent,
 )
 from openai.types.shared import Reasoning
 
@@ -83,12 +91,14 @@ Prefer simple, maintainable solutions and mention important limitations or
 verification steps. Never claim that you ran code, accessed files, or used a
 tool unless that capability was actually provided and used.
 
-You may use the shell to inspect the workspace. The shell is read-only: use it
-only to discover files or read their contents, and do not attempt to modify
-files, install dependencies, change Git state, or access paths outside the
-workspace. Invoke only one direct command per shell command, without pipes,
-redirections, command chaining, or helper commands such as printf. The allowed
-commands are: cat, find, git, head, ls, pwd, rg, tail, and wc.
+You may call the inspect_workspace function to inspect the workspace. It is
+read-only: use it only to discover files or read their contents, and do not
+attempt to modify files, install dependencies, change Git state, or access
+paths outside the workspace. Pass one or more direct commands in its commands
+array, without pipes, redirections, command chaining, or helper commands such
+as printf. Use a structured function call; never print or serialize a tool call
+such as <tool_call> in ordinary response text. The allowed commands are: cat,
+find, git, head, ls, pwd, rg, tail, and wc.
 When you need to distinguish files from directories, use `ls -1p` so directory
 names have a trailing slash.
 """
@@ -184,7 +194,7 @@ def _validate_read_only_command(
 
 
 async def execute_read_only_shell(
-    request: ShellCommandRequest,
+    commands: Sequence[str],
     *,
     workspace: str | Path | None = None,
     permissions: AgentPermissions = DEFAULT_AGENT_PERMISSIONS,
@@ -192,7 +202,7 @@ async def execute_read_only_shell(
     """Execute allowlisted read-only shell commands inside the workspace."""
     workspace_path = _resolve_workspace(workspace)
     outputs: list[str] = []
-    for command_text in request.data.action.commands:
+    for command_text in commands:
         try:
             tokens = shlex.split(command_text)
         except ValueError as error:
@@ -240,6 +250,38 @@ async def execute_read_only_shell(
     return "\n".join(outputs)
 
 
+def build_read_only_workspace_tool(
+    *,
+    workspace: str | Path | None = None,
+    permissions: AgentPermissions = DEFAULT_AGENT_PERMISSIONS,
+) -> FunctionTool:
+    """Build a structured function tool for safe workspace inspection."""
+    workspace_path = _resolve_workspace(workspace)
+
+    @function_tool(
+        name_override="inspect_workspace",
+        description_override=(
+            "Execute one or more allowlisted, read-only commands inside the "
+            "workspace and return their combined output. Each item must be a "
+            "direct command without pipes, redirection, or shell expansion."
+        ),
+        strict_mode=True,
+    )
+    async def inspect_workspace(commands: list[str]) -> str:
+        """Inspect files and Git metadata in the configured workspace.
+
+        Args:
+            commands: Direct read-only commands to execute in order.
+        """
+        return await execute_read_only_shell(
+            commands,
+            workspace=workspace_path,
+            permissions=permissions,
+        )
+
+    return inspect_workspace
+
+
 async def run_code_agent(
     question: str,
     system_prompt: str = SYSTEM_PROMPT,
@@ -249,8 +291,10 @@ async def run_code_agent(
     reason_effect: str = DEFAULT_REASON_EFFECT,
     workspace: str | Path | None = None,
     permissions: str | AgentPermissions = "read-only",
+    output_stream: TextIO | None = None,
+    capture_stream: TextIO | None = None,
 ) -> str:
-    """Run the Code Agent once and return its final output."""
+    """Run the Agent, optionally display and capture deltas, and return final output."""
     workspace_path = _resolve_workspace(workspace)
     permission_profile = _resolve_permissions(permissions)
     if enable_reasoning and reason_effect not in REASON_EFFECTS:
@@ -279,16 +323,66 @@ async def run_code_agent(
             else Reasoning(effort="none")
         ),
         tools=[
-            ShellTool(
-                executor=partial(
-                    execute_read_only_shell,
-                    workspace=workspace_path,
-                    permissions=permission_profile,
-                )
+            build_read_only_workspace_tool(
+                workspace=workspace_path,
+                permissions=permission_profile,
             )
         ],
     )
-    result = await Runner.run(agent, task_input)
+    result = Runner.run_streamed(agent, task_input)
+    active_section: str | None = None
+    wrote_output = False
+    last_chunk_ends_with_newline = False
+    response_streams = [
+        stream
+        for stream in (output_stream, capture_stream)
+        if stream is not None
+    ]
+    if (
+        len(response_streams) == 2
+        and response_streams[0] is response_streams[1]
+    ):
+        response_streams.pop()
+
+    def write_response(text: str) -> None:
+        for stream in response_streams:
+            stream.write(text)
+            stream.flush()
+
+    async for event in result.stream_events():
+        if event.type != "raw_response_event":
+            continue
+
+        section: str | None = None
+        if isinstance(event.data, ResponseTextDeltaEvent):
+            section = "content"
+        elif isinstance(
+            event.data,
+            (
+                ResponseReasoningTextDeltaEvent,
+                ResponseReasoningSummaryTextDeltaEvent,
+            ),
+        ):
+            section = "reasoning"
+
+        if section == "reasoning" and not enable_reasoning:
+            continue
+        if section is None or not response_streams or not event.data.delta:
+            continue
+
+        if enable_reasoning and section != active_section:
+            if wrote_output and not last_chunk_ends_with_newline:
+                write_response("\n")
+            write_response(f"[{section}]\n")
+            active_section = section
+
+        write_response(event.data.delta)
+        wrote_output = True
+        last_chunk_ends_with_newline = event.data.delta.endswith("\n")
+
+    if response_streams and wrote_output and not last_chunk_ends_with_newline:
+        write_response("\n")
+
     return str(result.final_output)
 
 
@@ -308,6 +402,45 @@ def _workspace_argument(value: str) -> Path:
         return _resolve_workspace(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _resolve_output_file(
+    output: str,
+    *,
+    workspace: str | Path | None = None,
+    output_file: str | Path | None = None,
+) -> Path:
+    """Return a safe absolute output path inside the workspace."""
+    workspace_path = _resolve_workspace(workspace)
+    if output_file is None:
+        response_hash = hashlib.sha256(output.encode("utf-8")).hexdigest()[:16]
+        relative_path = Path(".agents") / f"response-{response_hash}.txt"
+    else:
+        relative_path = Path(output_file).expanduser()
+        if relative_path.is_absolute():
+            raise ValueError("output-file 必须是 workspace 内的相对路径。")
+
+    output_path = (workspace_path / relative_path).resolve()
+    if output_path == workspace_path or not output_path.is_relative_to(workspace_path):
+        raise ValueError("output-file 必须指向 workspace 内的文件。")
+    return output_path
+
+
+def persist_agent_output(
+    output: str,
+    *,
+    workspace: str | Path | None = None,
+    output_file: str | Path | None = None,
+) -> Path:
+    """Persist the final Agent output and return its absolute path."""
+    output_path = _resolve_output_file(
+        output,
+        workspace=workspace,
+        output_file=output_file,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(output, encoding="utf-8")
+    return output_path
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -336,6 +469,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="可选的补充信息、上一步结果或中间信息。",
     )
     parser.add_argument(
+        "--enable-stream-output",
+        nargs="?",
+        const=True,
+        type=_parse_boolean,
+        default=True,
+        help=(
+            "是否实时输出 Agent 响应，可传 true/false；"
+            "设为 false 时在响应结束后一次性输出（默认 true）。"
+        ),
+    )
+    parser.add_argument(
         "--enable-reasoning",
         nargs="?",
         const=True,
@@ -358,6 +502,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Agent 工作目录；省略时使用启动脚本时的当前目录。",
     )
     parser.add_argument(
+        "--output-file",
+        default=None,
+        help=(
+            "最终响应在 workspace 内的保存路径；省略时保存为 "
+            ".agents/response-<响应哈希>.txt。"
+        ),
+    )
+    parser.add_argument(
         "--permissions",
         choices=tuple(PERMISSION_PROFILES),
         default="read-only",
@@ -374,6 +526,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     """Run the command-line application."""
     args = parse_args(argv)
+    captured_response = StringIO()
     output = asyncio.run(
         run_code_agent(
             question=args.question,
@@ -384,9 +537,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             reason_effect=args.reason_effect,
             workspace=args.workspace,
             permissions=args.permissions,
+            output_stream=sys.stdout if args.enable_stream_output else None,
+            capture_stream=captured_response,
         )
     )
-    print(output)
+    persisted_output = captured_response.getvalue() or output
+    output_path = persist_agent_output(
+        persisted_output,
+        workspace=args.workspace,
+        output_file=args.output_file,
+    )
+    if not args.enable_stream_output:
+        print(output)
+    print(f"响应结果已保存到：{output_path}")
 
 
 if __name__ == "__main__":
