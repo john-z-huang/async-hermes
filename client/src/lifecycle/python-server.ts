@@ -120,6 +120,15 @@ export class PythonServerLifecycle {
     clearTimeout(timer);
   }
 
+  /** 第二次中断或父进程异常时立即回收，避免遗留孤儿 Python 进程。 */
+  public forceStop(): void {
+    this.stopping = true;
+    this.client?.close();
+    this.client = undefined;
+    this.child?.kill("SIGKILL");
+    this.child = undefined;
+  }
+
   private async waitForHandshake(child: ChildProcess): Promise<string> {
     const stdout = child.stdout;
     if (!stdout) throw new PythonServerStartupError("无法读取 Python Server 启动握手。");

@@ -75,4 +75,20 @@ describe("PythonServerLifecycle", () => {
       args: ["run", "hermes-grpc-server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake", "--config", "config.json5"],
     });
   });
+
+  it("强制停止会立即终止仍在运行的子进程", async () => {
+    const child = new FakeChild();
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "uv", args: [] },
+      spawn: () => child as never,
+      createClient: () => client(serving),
+    });
+    const starting = lifecycle.start();
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    await starting;
+
+    lifecycle.forceStop();
+
+    expect(child.signals).toEqual(["SIGKILL"]);
+  });
 });

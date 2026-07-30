@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 import json
 import logging
+import signal
 import sys
 from typing import Final, TextIO
 from uuid import uuid4
@@ -299,9 +300,28 @@ async def _serve(
     await server.start()
     if startup_handshake:
         write_startup_handshake(sys.stdout, server.address)
+    shutdown_requested = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    for received_signal in handled_signals:
+        try:
+            loop.add_signal_handler(received_signal, shutdown_requested.set)
+        except NotImplementedError:  # pragma: no cover - Windows 不支持 asyncio 信号处理器。
+            pass
     try:
-        await server.wait_for_termination()
+        terminated = asyncio.create_task(server.wait_for_termination())
+        shutdown = asyncio.create_task(shutdown_requested.wait())
+        done, pending = await asyncio.wait((terminated, shutdown), return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await asyncio.gather(*done, return_exceptions=True)
     finally:
+        for received_signal in handled_signals:
+            try:
+                loop.remove_signal_handler(received_signal)
+            except NotImplementedError:  # pragma: no cover - Windows 不支持 asyncio 信号处理器。
+                pass
         await server.stop()
 
 
