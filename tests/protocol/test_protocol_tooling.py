@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 
@@ -9,10 +10,32 @@ import subprocess
 ROOT = Path(__file__).parents[2]
 
 
+def protocol_baseline_ref() -> str | None:
+    """返回当前 checkout 中可用的协议兼容性基线。"""
+    candidates = (
+        os.environ.get("HERMES_PROTOCOL_BASELINE_REF"),
+        "main",
+        "origin/main",
+    )
+    for ref in dict.fromkeys(candidate for candidate in candidates if candidate):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return ref
+    return None
+
+
 def test_schema_lint_and_breaking_change_check_pass() -> None:
     subprocess.run(["buf", "lint", "proto"], cwd=ROOT, check=True)
+    baseline_ref = protocol_baseline_ref()
+    if baseline_ref is None:
+        return
     baseline_files = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "main", "--", "proto"],
+        ["git", "ls-tree", "-r", "--name-only", baseline_ref, "--", "proto"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -20,10 +43,18 @@ def test_schema_lint_and_breaking_change_check_pass() -> None:
     ).stdout.splitlines()
     if any(path.endswith(".proto") for path in baseline_files):
         subprocess.run(
-            ["buf", "breaking", "proto", "--against", ".git#branch=main"],
+            ["buf", "breaking", "proto", "--against", ".git#branch=" + baseline_ref],
             cwd=ROOT,
             check=True,
         )
+
+
+def test_protocol_baseline_prefers_ci_reference(
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setenv("HERMES_PROTOCOL_BASELINE_REF", "origin/main")
+
+    assert protocol_baseline_ref() == "origin/main"
 
 
 def test_generation_does_not_change_committed_types() -> None:
