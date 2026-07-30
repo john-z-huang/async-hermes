@@ -1,0 +1,27 @@
+name: Hermes 协议契约
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-contract:
+    name: 验证 Protobuf 协议与生成类型
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - uses: astral-sh/setup-uv@v7
+      - uses: bufbuild/buf-setup-action@v1
+      - run: npm ci
+      - run: uv sync --group dev
+      - run: ./scripts/check-protocol.sh
+      - run: uv run pytest tests/protocol tests/generated
