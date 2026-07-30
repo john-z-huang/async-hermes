@@ -77,6 +77,38 @@ describe("PythonServerLifecycle", () => {
     await expect(exiting).rejects.toBeInstanceOf(PythonServerStartupError);
   });
 
+  it("启动超时后回收子进程", async () => {
+    const child = new FakeChild();
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "uv", args: [] },
+      startupTimeoutMs: 5,
+      spawn: () => child as never,
+    });
+
+    await expect(lifecycle.start()).rejects.toThrow("等待 Python Server 就绪超时");
+    expect(child.signals).toEqual(["SIGTERM"]);
+  });
+
+  it("启动完成后的异常退出会通知调用方", async () => {
+    const child = new FakeChild();
+    let message = "";
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "uv", args: [] },
+      spawn: () => child as never,
+      createClient: () => client(serving),
+      onUnexpectedExit: (reported) => {
+        message = reported;
+      },
+    });
+    const starting = lifecycle.start();
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    await starting;
+
+    child.emit("exit", 23, null);
+
+    expect(message).toContain("意外退出");
+  });
+
   it("开发模式使用临时端口和受控握手", () => {
     expect(developmentPythonServerCommand("config.json5", undefined)).toEqual({
       executable: "uv",
