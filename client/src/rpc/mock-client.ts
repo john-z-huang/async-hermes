@@ -1,4 +1,10 @@
-import type { AgentEvent, CancelTurnResponse, Session } from "../generated/v1/agent.js";
+import {
+  ServingStatus,
+  type AgentEvent,
+  type CancelTurnResponse,
+  type HealthCheckResponse,
+  type Session,
+} from "../generated/v1/agent.js";
 import type { HermesRpcClient, TurnSubscription } from "./hermes-client.js";
 
 /** 用于 UI 测试的内存 fixture，不依赖网络或真实模型。 */
@@ -6,6 +12,10 @@ export class MockHermesClient implements HermesRpcClient {
   public readonly cancelled: Array<{ sessionId: string; turnId: string }> = [];
 
   public constructor(private readonly scriptedEvents: AgentEvent[] = []) {}
+
+  public async healthCheck(): Promise<HealthCheckResponse> {
+    return { status: ServingStatus.SERVING_STATUS_SERVING, protocolVersion: "v1" };
+  }
 
   public async createSession(sessionId = "mock-session"): Promise<Session> {
     return { sessionId, status: 1 };

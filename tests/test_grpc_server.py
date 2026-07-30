@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 
 import grpc
 import pytest
 
 from hermes.application import AgentService, RunnerEvent, RunnerEventType, TurnRequest
-from hermes.interfaces.grpc_server import HermesGrpcServer
+from hermes.interfaces.grpc_server import HermesGrpcServer, write_startup_handshake
 from hermes.interfaces.generated.v1 import agent_pb2, agent_pb2_grpc
 
 
@@ -221,3 +223,15 @@ async def test_graceful_stop_cancels_active_turn_and_cleans_registry() -> None:
 def test_server_rejects_non_loopback_addresses() -> None:
     with pytest.raises(ValueError, match="loopback"):
         HermesGrpcServer(AgentService(FakeRunner()), host="0.0.0.0")
+
+
+def test_startup_handshake_is_machine_readable_and_contains_no_configuration() -> None:
+    output = io.StringIO()
+
+    write_startup_handshake(output, "127.0.0.1:54321")
+
+    assert json.loads(output.getvalue()) == {
+        "address": "127.0.0.1:54321",
+        "protocol_version": "v1",
+        "type": "hermes-started",
+    }

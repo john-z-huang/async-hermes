@@ -5,6 +5,7 @@ import {
   type CancelTurnResponse,
   type HermesAgentClient as GeneratedHermesAgentClient,
   HermesAgentClient,
+  type HealthCheckResponse,
   type Session,
 } from "../generated/v1/agent.js";
 
@@ -29,6 +30,7 @@ export interface TurnSubscription {
 
 /** TUI 依赖的最小 RPC 端口；测试可提供 mock，绝不传递 SDK 历史。 */
 export interface HermesRpcClient {
+  healthCheck(): Promise<HealthCheckResponse>;
   createSession(sessionId?: string): Promise<Session>;
   runTurn(sessionId: string, userInput: string): TurnSubscription;
   cancelTurn(sessionId: string, turnId: string): Promise<CancelTurnResponse>;
@@ -87,6 +89,15 @@ export class GrpcHermesClient implements HermesRpcClient {
       this.client.createSession({ sessionId }, (error, session) => {
         if (error) return reject(toRpcError(error));
         resolve(session);
+      });
+    });
+  }
+
+  public healthCheck(): Promise<HealthCheckResponse> {
+    return new Promise((resolve, reject) => {
+      this.client.healthCheck({}, (error, response) => {
+        if (error) return reject(toRpcError(error));
+        resolve(response);
       });
     });
   }

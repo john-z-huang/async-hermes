@@ -1,6 +1,13 @@
 import { loadConfig } from "./config.js";
 
-export function optionsFromArgs(argv: string[]): { address: string; showReasoning: boolean } {
+export interface CliOptions {
+  address: string;
+  configPath?: string;
+  showReasoning: boolean;
+  startPythonServer: boolean;
+}
+
+export function optionsFromArgs(argv: string[]): CliOptions {
   const addressIndex = argv.indexOf("--address");
   const configIndex = argv.indexOf("--config");
   if (argv.includes("--help")) {
@@ -13,5 +20,10 @@ export function optionsFromArgs(argv: string[]): { address: string; showReasonin
     addressIndex !== -1 && argv[addressIndex + 1]
       ? argv[addressIndex + 1]
       : process.env.HERMES_GRPC_ADDRESS || (config ? `${config.rpc.host}:${config.rpc.port}` : "127.0.0.1:50051");
-  return { address, showReasoning: config?.tui.showReasoning ?? false };
+  return {
+    address,
+    configPath: configIndex !== -1 ? argv[configIndex + 1] : undefined,
+    showReasoning: config?.tui.showReasoning ?? false,
+    startPythonServer: addressIndex === -1 && process.env.HERMES_GRPC_ADDRESS === undefined,
+  };
 }

@@ -96,11 +96,25 @@ npm run build
 
 `npm run build` 会先将 TUI、生产依赖和项目代码打包为单一脚本，再使用 Node 原生 Single Executable Application（SEA）功能生成本机平台的 `dist/hermes` 可执行文件。构建环境需要 Node.js 25.5.0 或更高版本；不同操作系统与 CPU 架构必须分别构建，产物不应跨平台复用。
 
-先在另一个终端启动本地 gRPC 服务（本任务不负责 Python 子进程生命周期），再启动 TUI：
+默认只需一个 Node 命令。Node 会以子进程启动 Python Server，要求它绑定系统分配的
+loopback 临时端口，读取 stdout 中唯一的 JSON 启动握手，再通过 `HealthCheck` 和 `v1`
+协议版本校验后才显示可交互 TUI：
+
+```bash
+npm run tui -- --config ./hermes.config.json5
+```
+
+开发模式使用 `uv run hermes-grpc-server`。打包模式必须由安装器或启动器设置
+`HERMES_PYTHON_EXECUTABLE` 为随应用分发的 Python 可执行文件；Node 会以
+`<python> -m hermes.interfaces.grpc_server` 调用它，不会搜索用户机器上的任意 Python。
+两种模式都通过参数数组启动，不拼接 shell 命令；子进程只继承明确白名单中的环境变量。
+
+如需调试已单独启动的本地 Server，可显式使用 `--address`（或
+`HERMES_GRPC_ADDRESS`），此时 TUI 不管理该进程：
 
 ```bash
 uv run hermes-grpc-server --config ./hermes.config.json5
-npm run tui -- --config ./hermes.config.json5
+npm run tui -- --address 127.0.0.1:50051
 ```
 
 也可在构建后直接运行二进制文件：
@@ -110,6 +124,8 @@ npm run tui -- --config ./hermes.config.json5
 ```
 
 TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
+正常退出、`SIGINT`、`SIGTERM` 或未捕获异常都会关闭 gRPC client，并向 Python 发送
+`SIGTERM`；超时后升级为 `SIGKILL`。连续第二次中断会立即强制回收子进程。
 
 ## Workspace inspection tool
 
