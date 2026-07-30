@@ -13,6 +13,7 @@ name = "agent-hermes-and-async-batch-tasks"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "grpcio" },
     { name = "openai-agents" },
 ]
 
@@ -23,7 +24,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "openai-agents", specifier = ">=0.19.0" }]
+requires-dist = [
+    { name = "grpcio", specifier = ">=1.83.0" },
+    { name = "openai-agents", specifier = ">=0.19.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [

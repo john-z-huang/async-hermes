@@ -1,6 +1,6 @@
 # Hermes 当前项目架构
 
-本文档描述 Issue #8 重构完成后的 Python 项目结构、职责边界和主要运行流程，供后续开发者与 Code Agent 快速了解当前实现。
+本文档描述 Python Core 与 gRPC Server 的项目结构、职责边界和主要运行流程，供后续开发者与 Code Agent 快速了解当前实现。
 
 ## 架构目标
 
@@ -10,7 +10,9 @@ Hermes 将 Agent 业务逻辑从具体终端中抽离，使 Python Agent Core/Ap
 
 ```text
 main.py
-  └─ interfaces/cli.py
+  └─ interfaces/
+       ├─ cli.py
+       └─ grpc_server.py
        ├─ application/agent_service.py
        │    └─ domain/
        └─ infrastructure/
@@ -131,6 +133,17 @@ async for event in service.run_turn(session_id, text):
 - 控制标准输出、错误提示和响应持久化。
 
 loop 与 one-shot 创建方式不同，但复用同一个 `AgentService.run_turn()`。
+
+`grpc_server.py` 是本地 RPC 适配器，负责：
+
+- 将 Protobuf 请求和领域模型相互转换，不直接读取或写入 Agents SDK 历史；
+- 将 `AgentEvent` 转换为单调递增的服务端流，并把内部异常转换为不含敏感信息的 `RpcError`；
+- 同一 session 串行执行；不同 session 可并发；
+- 将 `CancelTurn`、客户端断开和服务关闭传递为底层 Turn 协程取消；
+- 仅绑定 `127.0.0.1`、`::1` 或 `localhost`，默认由系统分配临时端口；
+- 在关闭时先停止接收请求、取消活跃 Turn，再停止 gRPC 监听器。
+
+它通过 `HermesGrpcServer` 管理生命周期，并可用 `hermes-grpc-server` 独立启动。`HealthCheck` 在接收新 Turn 时返回 `SERVING`；开始关闭后内部状态转为 `NOT_SERVING`。
 
 ## 一轮请求的执行流程
 
