@@ -87,7 +87,13 @@ export class PythonServerLifecycle {
     child.once("exit", () => {
       if (!this.stopping) this.options.onUnexpectedExit?.("Python Server 已意外退出，无法继续接受新 Turn。");
     });
-    const address = await this.waitForHandshake(child);
+    let address: string;
+    try {
+      address = await this.waitForHandshake(child);
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
     const client = this.createClient(address);
     try {
       verifyHealthCheck(await client.healthCheck());

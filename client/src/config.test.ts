@@ -43,7 +43,13 @@ describe("共享 JSON5 配置", () => {
     const path = configFile("{ version: 1, rpc: { host: '127.0.0.1', port: 50051 }, tui: { showReasoning: true } }");
     expect(optionsFromArgs(["--config", path, "--address", "localhost:60000"])).toEqual({
       address: "localhost:60000",
+      configPath: path,
       showReasoning: true,
+      startPythonServer: false,
     });
+  });
+
+  it("未指定地址时默认由 Node 托管 Python Server", () => {
+    expect(optionsFromArgs([]).startPythonServer).toBe(true);
   });
 });
