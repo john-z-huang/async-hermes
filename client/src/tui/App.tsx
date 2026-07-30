@@ -15,6 +15,7 @@ interface ActiveTurn {
 
 export interface AppProps {
   client: HermesRpcClient;
+  showReasoning?: boolean;
 }
 
 function eventColor(kind: DisplayEvent["kind"]): string {
@@ -39,7 +40,7 @@ function EventLine({ event }: { event: DisplayEvent }) {
 }
 
 /** React/Ink 终端视图：只管理展示状态，业务历史始终留在 Python 服务。 */
-export function App({ client }: AppProps) {
+export function App({ client, showReasoning = false }: AppProps) {
   const { exit } = useApp();
   const [state, setState] = useState(initialTuiState);
   const [input, setInput] = useState("");
@@ -120,6 +121,7 @@ export function App({ client }: AppProps) {
 
   const selectedEvents = Object.values(state.turns)
     .flatMap((turn) => turn.events)
+    .filter((event) => showReasoning || event.kind !== "reasoning")
     .slice(scrollOffset);
 
   return (

@@ -28,6 +28,18 @@ main.py
 - `infrastructure` 实现 Agents SDK、workspace 工具和文件持久化；
 - `interfaces` 负责参数、用户输入、终端渲染及进程级装配。
 
+## 共享运行配置
+
+`hermes/config.py` 与 `client/src/config.ts` 分别在 Python 与 Node 运行时加载同一份
+显式指定的 JSON5 文件。该文件只描述非敏感运行参数，当前版本为 `1`；两个实现均拒绝
+未知字段、未知版本、非法类型和非 loopback RPC host。Node 只将配置用于连接与展示，绝不
+将其作为 workspace 或权限授权；Python 仍通过 `resolve_workspace` 与权限配置执行权威校验。
+
+配置不会自动从当前目录探测：调用方必须传递 `--config <路径>`。这样已安装 CLI、gRPC
+Server 与 SEA TUI 可以共享同一确定文件，也避免因工作目录变化意外读取其他配置。未传入
+配置时，各入口保留既有默认值。显式 CLI 参数优先；TUI 的 `HERMES_GRPC_ADDRESS` 在配置后
+覆盖、在 `--address` 前被覆盖。配置文件不得包含 API key、令牌、密码或 SDK 历史。
+
 ## 代码目录
 
 ```text

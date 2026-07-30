@@ -207,6 +207,9 @@ tempCodeRunnerFile.py
 # Persisted Agent responses
 .agents/response-*.txt
 
+# 本机非敏感运行配置；请从示例文件复制创建，且不得写入机密。
+hermes.config.json5
+
 # Ruff stuff:
 .ruff_cache/
 
