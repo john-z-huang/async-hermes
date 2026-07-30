@@ -1,0 +1,56 @@
+name: Hermes 测试与质量门禁
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python 单元与服务测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --group dev
+      - run: uv run pytest tests/test_main.py tests/test_config.py tests/test_grpc_server.py
+
+  node-tests:
+    name: Node 单元与静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+  cross-language-tests:
+    name: Node-Python 跨语言进程测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - uses: astral-sh/setup-uv@v7
+      - run: npm ci
+      - run: uv sync --group dev
+      - run: npm run test:cross-language

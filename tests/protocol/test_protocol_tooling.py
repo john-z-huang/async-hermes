@@ -96,3 +96,18 @@ def test_typescript_generation_omits_host_protoc_version() -> None:
     ).read_text(encoding="utf-8")
 
     assert "protoc               v" not in generated_type
+
+
+def test_ci_runs_python_node_and_cross_language_layers_without_api_key() -> None:
+    workflow = (
+        ROOT / ".github" / "workflows" / "quality.yml"
+    ).read_text(encoding="utf-8")
+    package = (ROOT / "package.json").read_text(encoding="utf-8")
+
+    for job in ("python-tests:", "node-tests:", "cross-language-tests:"):
+        assert job in workflow
+    assert 'OPENAI_API_KEY: ""' in workflow
+    assert "uv run pytest tests/test_main.py tests/test_config.py tests/test_grpc_server.py" in workflow
+    assert "npm test" in workflow
+    assert "npm run test:cross-language" in workflow
+    assert '"test:cross-language": "vitest run client/src/integration"' in package
