@@ -46,6 +46,12 @@ uv run hermes-grpc-server --host 127.0.0.1 --port 50051
 
 Node 父进程可调用 `hermes.v1.HermesAgent/HealthCheck`，在服务就绪时会得到 `SERVING_STATUS_SERVING` 与协议版本 `v1`。按 `Ctrl-C` 会停止接收新的 Turn、取消活跃 Turn 并释放端口；同一 session 同时只能运行一个 Turn，不同 session 可以并发执行。
 
+若当前 shell 已安全配置 `OPENAI_API_KEY`，可运行真实 API 冒烟测试。该脚本会启动独立的 `hermes-grpc-server`，执行 `HealthCheck` 和一轮真实模型请求，并自动关闭子进程；不会输出凭据。
+
+```bash
+uv run python scripts/smoke_grpc_real_api.py
+```
+
 ## Workspace inspection tool
 
 The agent exposes workspace access as the strict `inspect_workspace` function
