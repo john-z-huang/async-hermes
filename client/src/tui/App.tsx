@@ -95,13 +95,15 @@ export function App({ client, showReasoning = false }: AppProps) {
   const cancel = async () => {
     const active = activeTurn.current;
     if (!active) return;
-    active.subscription.cancel();
-    if (active.turnId) {
-      try {
-        await client.cancelTurn(active.sessionId, active.turnId);
-      } catch (error) {
-        setState((previous) => ({ ...previous, connectionError: `RPC 错误：${String(error)}` }));
-      }
+    if (!active.turnId) {
+      active.subscription.cancel();
+      return;
+    }
+    try {
+      await client.cancelTurn(active.sessionId, active.turnId);
+    } catch (error) {
+      active.subscription.cancel();
+      setState((previous) => ({ ...previous, connectionError: `RPC 错误：${String(error)}` }));
     }
   };
 

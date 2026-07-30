@@ -25,6 +25,8 @@ function client(health: HealthCheckResponse): HermesRpcClient & { closed: boolea
     closed: false,
     healthCheck: async () => health,
     createSession: async () => ({ sessionId: "one", status: 1 }),
+    getSession: async (sessionId) => ({ sessionId, status: 1, turns: [] }),
+    listSessions: async () => ({ sessions: [] }),
     runTurn: () => ({ events: (async function* () {})(), cancel: () => undefined }),
     cancelTurn: async () => ({ result: 1 }),
     close() {

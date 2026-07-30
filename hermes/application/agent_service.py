@@ -28,6 +28,7 @@ class RunnerEventType(StrEnum):
     REASONING_DELTA = "reasoning_delta"
     TOOL_STARTED = "tool_started"
     TOOL_FINISHED = "tool_finished"
+    ARTIFACT_CREATED = "artifact_created"
     COMPLETED = "completed"
 
 
