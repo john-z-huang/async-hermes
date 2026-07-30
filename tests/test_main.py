@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import main
 import pytest
@@ -25,6 +25,7 @@ from openai.types.responses import (
 def make_stream_result(
     *events: object,
     final_output: str = "done",
+    input_list: list[object] | None = None,
 ) -> SimpleNamespace:
     """Create the portion of a streamed SDK result used by the runner tests."""
 
@@ -35,6 +36,7 @@ def make_stream_result(
     return SimpleNamespace(
         final_output=final_output,
         stream_events=stream_events,
+        to_input_list=Mock(return_value=input_list or []),
     )
 
 
@@ -372,6 +374,82 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
                 reason_effect="unsupported",
             )
 
+    async def test_preserves_structured_history_and_appends_the_next_question(
+        self,
+    ) -> None:
+        first_history = [
+            {"role": "user", "content": "initial task"},
+            {
+                "type": "function_call",
+                "call_id": "call-1",
+                "name": "inspect_workspace",
+                "arguments": '{"commands":["rg --files"]}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": "main.py",
+            },
+            {"role": "assistant", "content": "analysis result"},
+        ]
+        second_history = [
+            *first_history,
+            {"role": "user", "content": "what is missing?"},
+            {"role": "assistant", "content": "tests are missing"},
+        ]
+        runner_inputs: list[object] = []
+
+        def fake_run(agent: object, task_input: object) -> SimpleNamespace:
+            runner_inputs.append(task_input)
+            input_list = first_history if len(runner_inputs) == 1 else second_history
+            return make_stream_result(input_list=input_list)
+
+        session_history: list[object] = []
+        with patch.object(main.Runner, "run_streamed", side_effect=fake_run):
+            await main.run_code_agent(
+                "analyze the project",
+                user_prompt="session instructions",
+                content="initial context",
+                session_history=session_history,
+            )
+            await main.run_code_agent(
+                "what is missing?",
+                user_prompt="session instructions",
+                content="initial context",
+                session_history=session_history,
+            )
+
+        assert isinstance(runner_inputs[0], str)
+        assert "session instructions" in runner_inputs[0]
+        assert "initial context" in runner_inputs[0]
+        assert runner_inputs[1] == [
+            *first_history,
+            {"role": "user", "content": "what is missing?"},
+        ]
+        assert session_history == second_history
+
+    async def test_failed_turn_does_not_change_existing_history(self) -> None:
+        history: list[object] = [
+            {"role": "user", "content": "completed question"},
+            {"role": "assistant", "content": "completed answer"},
+        ]
+
+        with patch.object(
+            main.Runner,
+            "run_streamed",
+            side_effect=RuntimeError("context window exceeded"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "context window exceeded"):
+                await main.run_code_agent(
+                    "next question",
+                    session_history=history,
+                )
+
+        assert history == [
+            {"role": "user", "content": "completed question"},
+            {"role": "assistant", "content": "completed answer"},
+        ]
+
 
 class ParseArgsTests(unittest.TestCase):
     def test_new_arguments_use_expected_defaults(self) -> None:
@@ -619,7 +697,7 @@ class TestMain:
         self,
         tmp_path: Path,
     ) -> None:
-        run_and_persist = unittest.mock.Mock()
+        run_and_persist = Mock()
 
         with (
             patch("main._run_and_persist", run_and_persist),
@@ -638,12 +716,17 @@ class TestMain:
             "first",
             "second",
         ]
+        histories = [
+            call.kwargs["session_history"]
+            for call in run_and_persist.call_args_list
+        ]
+        assert histories[0] is histories[1]
 
     def test_loop_ignores_empty_input_and_quit_command(
         self,
         tmp_path: Path,
     ) -> None:
-        run_and_persist = unittest.mock.Mock()
+        run_and_persist = Mock()
 
         with (
             patch("main._run_and_persist", run_and_persist),
@@ -658,7 +741,7 @@ class TestMain:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        run_and_persist = unittest.mock.Mock(
+        run_and_persist = Mock(
             side_effect=[RuntimeError("provider unavailable"), None]
         )
 
@@ -670,3 +753,33 @@ class TestMain:
 
         assert run_and_persist.call_count == 2
         assert "本轮请求失败：provider unavailable" in capsys.readouterr().err
+
+    def test_loop_explicit_output_file_is_overwritten_each_turn(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        run_code_agent = AsyncMock(side_effect=["first answer", "second answer"])
+
+        with (
+            patch("main.run_code_agent", run_code_agent),
+            patch("builtins.input", side_effect=["first", "second", "/exit"]),
+        ):
+            main.main(
+                [
+                    "--enable-stream-output",
+                    "false",
+                    "--workspace",
+                    str(tmp_path),
+                    "--output-file",
+                    "results/latest.txt",
+                ]
+            )
+
+        assert run_code_agent.await_count == 2
+        assert (tmp_path / "results" / "latest.txt").read_text(
+            encoding="utf-8"
+        ) == "second answer"
+        console_output = capsys.readouterr().out
+        assert "first answer" in console_output
+        assert "second answer" in console_output
