@@ -6,9 +6,10 @@ import argparse
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+import json
 import logging
 import sys
-from typing import Final
+from typing import Final, TextIO
 from uuid import uuid4
 
 import grpc
@@ -69,6 +70,18 @@ def _safe_failure(error: Exception | str) -> agent_pb2.RpcError:
     if isinstance(error, ValueError):
         return _error(agent_pb2.ERROR_CODE_INVALID_ARGUMENT, "请求配置无效。")
     return _error(agent_pb2.ERROR_CODE_INTERNAL, "服务内部错误。", retryable=True)
+
+
+def write_startup_handshake(output: TextIO, address: str) -> None:
+    """向父进程输出一条不含日志或配置的启动握手记录。"""
+    output.write(
+        json.dumps(
+            {"type": "hermes-started", "address": address, "protocol_version": PROTOCOL_VERSION},
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    output.flush()
 
 
 class HermesAgentGrpcServicer(agent_pb2_grpc.HermesAgentServicer):
@@ -263,7 +276,13 @@ class HermesGrpcServer:
         await self._server.wait_for_termination()
 
 
-async def _serve(host: str, port: int, config: HermesConfig | None = None) -> None:
+async def _serve(
+    host: str,
+    port: int,
+    config: HermesConfig | None = None,
+    *,
+    startup_handshake: bool = False,
+) -> None:
     agent = config.agent if config is not None else None
     runner = AgentsSdkRunner(
         AgentsSdkRunnerConfig(
@@ -278,6 +297,8 @@ async def _serve(host: str, port: int, config: HermesConfig | None = None) -> No
     )
     server = HermesGrpcServer(AgentService(runner), host=host, port=port)
     await server.start()
+    if startup_handshake:
+        write_startup_handshake(sys.stdout, server.address)
     try:
         await server.wait_for_termination()
     finally:
@@ -299,10 +320,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", default=config_args.config)
     parser.add_argument("--host", default=config.rpc.host if config is not None else "127.0.0.1")
     parser.add_argument("--port", type=int, default=config.rpc.port if config is not None else 0)
+    parser.add_argument("--startup-handshake", action="store_true", help="向 stdout 输出机器可读启动信息")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        asyncio.run(_serve(args.host, args.port, config))
+        asyncio.run(_serve(args.host, args.port, config, startup_handshake=args.startup_handshake))
     except KeyboardInterrupt:
         return
 
