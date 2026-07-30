@@ -52,6 +52,8 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 
 - 涉及 GitHub（包括 Issue、Pull Request、Projects、Actions、仓库信息或评论）前，必须先查阅 Codex 的 GitHub Skill，并遵循其中与当前任务相关的建议。
 - 所有 GitHub 操作只能通过 GitHub CLI（`gh`）执行；绝对禁止通过浏览器或浏览器自动化工具操作 GitHub。
+- 使用 `gh` 命令遇到未登录或认证失效时，先确认环境变量 `GH_TOKEN` 已设置，再仅通过标准输入将其传递给 `gh auth login --with-token` 完成认证；`GH_TOKEN` 未设置时应报告认证阻塞，不得猜测、伪造或要求用户在对话中粘贴令牌。
+- `GH_TOKEN` 是敏感信息：严禁打印、回显、插值展示、记录或写入其值，包括终端与工具输出、日志文件、源代码、配置文件、提交信息、Issue、Pull Request、评论和错误报告；不得使用会暴露令牌的调试输出（例如 `set -x`、`echo`、`printenv` 或 `env`）。
 - 新增功能或修复新发现的问题前，必须先在本项目的 GitHub Issues 中创建对应的开放 Issue。
 - Issue 必须清晰、详细地说明功能需求或缺陷表现、影响范围、预期行为与验收标准；必要时补充复现步骤、技术约束和前置依赖。
 - 实现改动必须通过 Pull Request 合并，并在 PR 描述中关联对应的开放 Issue。
@@ -63,5 +65,7 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 
 - 看板：[Hermes 架构演进 Roadmap](https://github.com/users/john-z-huang/projects/7/views/1)。
 - 开始工作前，查看对应看板条目、Issue、前置依赖、状态和“阶段”字段。
-- 实际开始时将状态更新为“进行中”；完成并具备可交付成果时更新为“完成”。除非工作范围发生变化，否则保留已有阶段；缺失阶段且无法从工作性质合理判断时，请求产品或排期指示。
+- GitHub Issue 的关闭状态与 Projects 条目的 `Status` 字段是不同概念：实际开始时可将条目更新为“进行中”，但在关联 Pull Request 合并前，严禁主动关闭 Issue 或将条目 `Status` 提前更新为“完成”。
+- Pull Request 必须通过 `Closes #<Issue 编号>`（或等效关键字）关联开放 Issue；合并后由 GitHub 自动关闭 Issue。此后 Agent 仅核验 Issue 已关闭，再将对应 Projects 条目同步为“完成”，避免因提前关闭 Issue 违反开放 Issue 关联校验。
+- 除非工作范围发生变化，否则保留已有“阶段”；缺失阶段且无法从工作性质合理判断时，请求产品或排期指示。
 - 不得虚构日期、进度或状态。需要产品或排期决策时，请向用户请求指示。
