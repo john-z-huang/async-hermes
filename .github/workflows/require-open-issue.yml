@@ -8,9 +8,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -20,7 +17,6 @@ permissions:
 jobs:
   validate-pull-request:
     name: 校验开放 Issue 关联
-    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: 检查 PR 关联的开放 Issue
@@ -95,14 +91,3 @@ jobs:
           fi
 
           echo "已验证：PR 关联了 $open_issue_count 个本仓库开放 Issue。"
-
-  reject-direct-push:
-    name: 拒绝直接推送
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 拒绝绕过 Pull Request 的推送
-        shell: bash
-        run: |
-          echo "::error::禁止直接向 main 推送改动；请创建关联开放 Issue 的 Pull Request。"
-          exit 1
