@@ -39,16 +39,37 @@ async def wait_for_server(process: asyncio.subprocess.Process) -> int:
 
 
 async def stop_server(process: asyncio.subprocess.Process) -> None:
-    """以 SIGINT 请求优雅关闭；超时后才强制终止。"""
-    if process.returncode is not None:
-        return
-    process.send_signal(signal.SIGINT)
+    """结束整个子进程组，避免 ``uv`` 子进程遗留监听器。"""
+    process_group = process.pid
+    if process.returncode is None:
+        os.killpg(process_group, signal.SIGINT)
     try:
         async with asyncio.timeout(10):
             await process.wait()
     except TimeoutError:
-        process.kill()
-        await process.wait()
+        os.killpg(process_group, signal.SIGTERM)
+        try:
+            async with asyncio.timeout(5):
+                await process.wait()
+        except TimeoutError:
+            os.killpg(process_group, signal.SIGKILL)
+            await process.wait()
+
+    # ``uv run`` 可能是父进程，而 server 是其子进程。确认进程组也已退出，
+    # 防止脚本已返回但回环端口仍被后台进程占用。
+    for _ in range(20):
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.1)
+    os.killpg(process_group, signal.SIGTERM)
+    await asyncio.sleep(0.1)
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return
+    os.killpg(process_group, signal.SIGKILL)
 
 
 async def run_smoke_test() -> None:
@@ -68,6 +89,7 @@ async def run_smoke_test() -> None:
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
         env=os.environ.copy(),
+        start_new_session=True,
     )
     channel: grpc.aio.Channel | None = None
     try:
