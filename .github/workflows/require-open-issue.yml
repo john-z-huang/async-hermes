@@ -1,0 +1,108 @@
+name: 开放 Issue 关联校验
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  validate-pull-request:
+    name: 校验开放 Issue 关联
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 PR 关联的开放 Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GRAPHQL_URL: https://api.github.com/graphql
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          query='
+            query($id: ID!) {
+              node(id: $id) {
+                ... on PullRequest {
+                  closingIssuesReferences(first: 100) {
+                    nodes {
+                      number
+                      state
+                      url
+                      repository {
+                        nameWithOwner
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          '
+
+          payload="$(
+            jq -n \
+              --arg query "$query" \
+              --arg id "$PR_NODE_ID" \
+              '{query: $query, variables: {id: $id}}'
+          )"
+
+          response="$(
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --header "Content-Type: application/json" \
+              --data "$payload" \
+              "$GRAPHQL_URL"
+          )"
+
+          if jq -e '.errors | length > 0' >/dev/null 2>&1 <<<"$response"; then
+            jq -r '.errors[] | "::error::GitHub GraphQL 查询失败：\(.message)"' \
+              <<<"$response"
+            exit 1
+          fi
+
+          open_issue_count="$(
+            jq \
+              --arg repository "$REPOSITORY" \
+              '[
+                .data.node.closingIssuesReferences.nodes[]
+                | select(
+                    .state == "OPEN"
+                    and .repository.nameWithOwner == $repository
+                  )
+              ] | length' \
+              <<<"$response"
+          )"
+
+          if [[ "$open_issue_count" -lt 1 ]]; then
+            echo "::error::PR 必须使用 Closes、Fixes 或 Resolves 关联本仓库至少一个开放 Issue。"
+            echo "已关闭、其他仓库或普通文本引用的 Issue 不满足要求。"
+            exit 1
+          fi
+
+          echo "已验证：PR 关联了 $open_issue_count 个本仓库开放 Issue。"
+
+  reject-direct-push:
+    name: 拒绝直接推送
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拒绝绕过 Pull Request 的推送
+        shell: bash
+        run: |
+          echo "::error::禁止直接向 main 推送改动；请创建关联开放 Issue 的 Pull Request。"
+          exit 1
