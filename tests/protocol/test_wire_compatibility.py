@@ -2,33 +2,58 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from hermes.interfaces.generated.v1 import agent_pb2
 
 
+FIXTURES = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "protocol"
+        / "v1"
+        / "agent_events.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def fixture(name: str) -> dict[str, object]:
+    return next(item for item in FIXTURES if item["name"] == name)
+
+
+def parse(item: dict[str, object]) -> agent_pb2.AgentEvent:
+    event = agent_pb2.AgentEvent()
+    event.ParseFromString(bytes.fromhex(str(item["wire_hex"])))
+    return event
+
+
+@pytest.mark.parametrize(
+    "item",
+    FIXTURES,
+    ids=[str(item["name"]) for item in FIXTURES],
+)
+def test_shared_wire_fixtures_are_readable_by_python(
+    item: dict[str, object],
+) -> None:
+    event = parse(item)
+
+    assert event.session_id == item["session_id"]
+    assert event.turn_id == item["turn_id"]
+    assert event.sequence == item["sequence"]
+    assert event.WhichOneof("payload") == item["payload"]
+    if item["payload"] == "content_delta":
+        assert event.content_delta.text == item["text"]
+
+
 def test_content_delta_v1_wire_fixture_remains_stable() -> None:
-    # session_id="s", turn_id="t", sequence=1, content_delta.text="hi"
-    fixture = bytes.fromhex("0a017312017418015a040a026869")
-    event = agent_pb2.AgentEvent()
+    item = fixture("content_delta_v1")
+    event = parse(item)
 
-    event.ParseFromString(fixture)
-
-    assert event.session_id == "s"
-    assert event.turn_id == "t"
-    assert event.sequence == 1
-    assert event.WhichOneof("payload") == "content_delta"
-    assert event.content_delta.text == "hi"
-    assert event.SerializeToString() == fixture
-
-
-def test_future_unknown_fields_do_not_break_v1_reader() -> None:
-    # field 100 is intentionally unknown to v1; value is varint 1.
-    future_fixture = bytes.fromhex("0a017312017418015a040a026869a00601")
-    event = agent_pb2.AgentEvent()
-
-    event.ParseFromString(future_fixture)
-
-    assert event.WhichOneof("payload") == "content_delta"
-    assert event.content_delta.text == "hi"
+    assert event.SerializeToString() == bytes.fromhex(str(item["wire_hex"]))
 
 
 def test_published_event_payload_field_numbers_are_not_reassigned() -> None:
