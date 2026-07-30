@@ -40,3 +40,19 @@ def test_generation_does_not_change_committed_types() -> None:
         cwd=ROOT,
         check=True,
     )
+
+
+def test_ci_protocol_check_is_portable_and_fetches_its_baseline() -> None:
+    check_script = (ROOT / "scripts" / "check-protocol.sh").read_text(encoding="utf-8")
+    workflow = (
+        ROOT / ".github" / "workflows" / "protocol-contract.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "grep -q" in check_script
+    assert "rg -q" not in check_script
+    assert "HERMES_PROTOCOL_BASELINE_REF" in check_script
+    assert "git archive" in check_script
+    assert "fetch-depth: 0" in workflow
+    assert "git fetch --no-tags origin main:refs/remotes/origin/main" in workflow
+    assert "protobuf-compiler" in workflow
+    assert "HERMES_PROTOCOL_BASELINE_REF=origin/main" in workflow
