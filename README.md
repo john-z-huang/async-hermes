@@ -1,6 +1,35 @@
 # agent-hermes-and-async-batch-tasks
 Agent Hermes and Async Batch Tasks
 
+## 项目架构
+
+Python 代码已拆分为领域层、应用层、基础设施层和接口层。`main.py` 仅作为兼容 CLI 入口；`AgentService` 是 loop、one-shot 和未来 gRPC Server 共用的业务入口。
+
+详细的目录职责、依赖方向、事件流和后续扩展约束见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+
+## 安装与启动
+
+首次在仓库目录中安装可编辑的命令行工具：
+
+```bash
+uv tool install --editable .
+```
+
+安装后可以在任意目录直接运行：
+
+```bash
+hermes
+hermes --running-mode one-shot --question "总结当前项目"
+```
+
+`--workspace` 省略时仍使用执行命令时的当前目录。源码变更会由可编辑安装立即生效；更新依赖后可执行 `uv tool install --editable . --force` 刷新工具环境。
+
+原有入口继续兼容：
+
+```bash
+uv run python main.py
+```
+
 ## Workspace inspection tool
 
 The agent exposes workspace access as the strict `inspect_workspace` function
@@ -18,10 +47,10 @@ text-serialized tool calls are not supported.
 
 ## Running modes
 
-`main.py` defaults to an interactive `loop` session:
+`hermes` defaults to an interactive `loop` session:
 
 ```bash
-uv run python main.py
+hermes
 ```
 
 Enter one question per prompt. Empty input is ignored; enter `/exit` or `/quit`
@@ -29,7 +58,7 @@ to end the session. An optional `--question` is executed as the first turn
 before the program starts reading from standard input:
 
 ```bash
-uv run python main.py \
+hermes \
   --running-mode loop \
   --question "Summarize this project"
 ```
@@ -44,7 +73,7 @@ history, and history is discarded when the process exits.
 Use `one-shot` when exactly one request should run:
 
 ```bash
-uv run python main.py \
+hermes \
   --running-mode one-shot \
   --question "Summarize this project"
 ```
