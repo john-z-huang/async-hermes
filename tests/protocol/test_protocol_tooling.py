@@ -27,19 +27,20 @@ def test_schema_lint_and_breaking_change_check_pass() -> None:
 
 
 def test_generation_does_not_change_committed_types() -> None:
-    subprocess.run([ROOT / "scripts" / "generate-protocol.sh"], cwd=ROOT, check=True)
-    subprocess.run(
-        [
-            "git",
-            "diff",
-            "--exit-code",
-            "--",
-            "client/src/generated",
-            "hermes/interfaces/generated",
-        ],
-        cwd=ROOT,
-        check=True,
+    generated_paths = (
+        ROOT / "client" / "src" / "generated" / "v1" / "agent.ts",
+        ROOT / "hermes" / "interfaces" / "generated" / "v1" / "agent_pb2.py",
+        ROOT
+        / "hermes"
+        / "interfaces"
+        / "generated"
+        / "v1"
+        / "agent_pb2_grpc.py",
     )
+    before = {path: path.read_bytes() for path in generated_paths}
+    subprocess.run([ROOT / "scripts" / "generate-protocol.sh"], cwd=ROOT, check=True)
+
+    assert {path: path.read_bytes() for path in generated_paths} == before
 
 
 def test_ci_protocol_check_is_portable_and_fetches_its_baseline() -> None:
@@ -56,3 +57,11 @@ def test_ci_protocol_check_is_portable_and_fetches_its_baseline() -> None:
     assert "git fetch --no-tags origin main:refs/remotes/origin/main" in workflow
     assert "protobuf-compiler" in workflow
     assert "HERMES_PROTOCOL_BASELINE_REF=origin/main" in workflow
+
+
+def test_typescript_generation_omits_host_protoc_version() -> None:
+    generated_type = (
+        ROOT / "client" / "src" / "generated" / "v1" / "agent.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "protoc               v" not in generated_type

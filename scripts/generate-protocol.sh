@@ -18,5 +18,5 @@ protoc \
   -I proto/hermes/v1 \
   --plugin=protoc-gen-ts_proto="$root_dir/node_modules/.bin/protoc-gen-ts_proto" \
   --ts_proto_out="$typescript_out" \
-  --ts_proto_opt=env=node,esModuleInterop=true,outputServices=grpc-js \
+  --ts_proto_opt=annotateFilesWithVersion=false,env=node,esModuleInterop=true,outputServices=grpc-js \
   proto/hermes/v1/agent.proto
