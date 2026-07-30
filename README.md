@@ -30,6 +30,22 @@ hermes --running-mode one-shot --question "总结当前项目"
 uv run python main.py
 ```
 
+## 本地 gRPC Server
+
+Hermes 也可作为只监听本机回环地址的 gRPC Server 启动。默认使用由系统分配的临时端口；日志会输出实际端口，但不会记录请求正文、凭据或 SDK 原始错误。
+
+```bash
+uv run hermes-grpc-server
+```
+
+需要指定端口时，仍只能使用 loopback 地址：
+
+```bash
+uv run hermes-grpc-server --host 127.0.0.1 --port 50051
+```
+
+Node 父进程可调用 `hermes.v1.HermesAgent/HealthCheck`，在服务就绪时会得到 `SERVING_STATUS_SERVING` 与协议版本 `v1`。按 `Ctrl-C` 会停止接收新的 Turn、取消活跃 Turn 并释放端口；同一 session 同时只能运行一个 Turn，不同 session 可以并发执行。
+
 ## Workspace inspection tool
 
 The agent exposes workspace access as the strict `inspect_workspace` function

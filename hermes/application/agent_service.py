@@ -72,6 +72,10 @@ class AgentService:
         except KeyError as error:
             raise KeyError(f"未知 session：{session_id}") from error
 
+    def list_sessions(self) -> tuple[Session, ...]:
+        """按创建顺序返回当前进程的会话摘要来源。"""
+        return tuple(self._sessions.values())
+
     async def run_turn(
         self,
         session_id: str,

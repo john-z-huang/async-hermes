@@ -5,11 +5,13 @@ description = "Agent Hermes and Async Batch Tasks"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "grpcio>=1.83.0",
     "openai-agents>=0.19.0",
 ]
 
 [project.scripts]
 hermes = "hermes.interfaces.cli:main"
+hermes-grpc-server = "hermes.interfaces.grpc_server:main"
 
 [build-system]
 requires = ["hatchling"]
