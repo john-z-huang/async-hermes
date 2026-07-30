@@ -1,6 +1,9 @@
 {
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=25.5.0"
+  },
   "bin": {
     "hermes": "./bin/hermes.js"
   },
@@ -11,8 +14,9 @@
     "lint": "eslint .",
     "format:check": "prettier --check client/src/rpc client/src/tui client/src/cli.tsx bin/hermes.js vite.config.ts eslint.config.js package.json",
     "test": "vitest run",
-    "build": "vite build",
-    "tui": "npm run build && node ./bin/hermes.js"
+    "build:bundle": "vite build",
+    "build": "npm run build:bundle && node --build-sea sea-config.json && node scripts/sign-sea.js",
+    "tui": "npm run build && ./dist/hermes"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

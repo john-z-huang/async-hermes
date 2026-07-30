@@ -70,6 +70,8 @@ npm test
 npm run build
 ```
 
+`npm run build` 会先将 TUI、生产依赖和项目代码打包为单一脚本，再使用 Node 原生 Single Executable Application（SEA）功能生成本机平台的 `dist/hermes` 可执行文件。构建环境需要 Node.js 25.5.0 或更高版本；不同操作系统与 CPU 架构必须分别构建，产物不应跨平台复用。
+
 先在另一个终端启动本地 gRPC 服务（本任务不负责 Python 子进程生命周期），再启动 TUI：
 
 ```bash
@@ -77,7 +79,13 @@ uv run hermes-grpc-server --port 50051
 npm run tui -- --address 127.0.0.1:50051
 ```
 
-安装此 Node 包后，`hermes --address 127.0.0.1:50051` 是新的 TUI 命令。TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
+也可在构建后直接运行二进制文件：
+
+```bash
+./dist/hermes --address 127.0.0.1:50051
+```
+
+TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
 
 ## Workspace inspection tool
 
