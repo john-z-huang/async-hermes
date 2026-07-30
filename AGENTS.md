@@ -40,6 +40,14 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 - 项目文档使用中文；如确有必要保留英文术语，应同时提供清晰的中文说明。
 - Git 提交信息使用中文，简明说明变更目的和范围。
 
+## Git 分支命名
+
+- Git 分支名称必须只使用 ASCII 字符，不得包含中文或其他非 ASCII 字符，以避免终端、脚本、CI、URL 编码及跨平台协作中的兼容性问题。
+- 分支名称中的单词使用小写英文字母、数字和连字符（`-`）表示；需要表达层级时，仅可使用斜杠（`/`）分隔层级。
+- 分支名称应以清晰的类别前缀开始，例如 `agent/`、`feat/`、`fix/`、`docs/` 或 `refactor/`，并使用简短的英文描述说明变更内容。
+- 合规示例：`agent/docs-branch-naming`、`fix/batch-result-validation`、`feat/async-batch-submit`。
+- 不合规示例：`agent/更新-git-规则`、`修复/批处理校验`、`feature/分支命名`。
+
 ## 需求与变更流程
 
 - 涉及 GitHub（包括 Issue、Pull Request、Projects、Actions、仓库信息或评论）前，必须先查阅 Codex 的 GitHub Skill，并遵循其中与当前任务相关的建议。
