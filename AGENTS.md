@@ -48,6 +48,13 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 - 合规示例：`agent/docs-branch-naming`、`fix/batch-result-validation`、`feat/async-batch-submit`。
 - 不合规示例：`agent/更新-git-规则`、`修复/批处理校验`、`feature/分支命名`。
 
+## Git 提交规范
+
+- 以可独立验证的功能模块为提交边界；每完成一个功能模块，都必须同时补充或更新相应测试代码。
+- 只有在该模块相关测试通过后，才可提交该模块的 Git 改动；提交前应记录实际执行的验证命令及结果。
+- 不得将多个互不独立的功能模块、重构或文档变更混入同一个提交。应按可审查、可回滚的最小逻辑单元拆分提交。
+- 提交信息保持中文、简明，并准确描述该提交所包含的模块变更。
+
 ## 需求与变更流程
 
 - 涉及 GitHub（包括 Issue、Pull Request、Projects、Actions、仓库信息或评论）前，必须先查阅 Codex 的 GitHub Skill，并遵循其中与当前任务相关的建议。

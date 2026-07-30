@@ -63,10 +63,10 @@ main.py
 
 ```toml
 [project.scripts]
-hermes = "hermes.interfaces.cli:main"
+py-hermes = "hermes.interfaces.cli:main"
 ```
 
-执行一次 `uv tool install --editable .` 后，推荐直接使用 `hermes` 命令。可编辑安装会指向当前源码，适合本地开发。
+执行一次 `uv tool install --editable .` 后，可使用 `py-hermes` 运行 Python CLI。可编辑安装会指向当前源码，适合本地开发；`hermes` 保留给 Node React TUI。
 
 ### `main.py`
 
@@ -196,5 +196,5 @@ uv run pytest
 验证已安装命令：
 
 ```bash
-hermes --help
+py-hermes --help
 ```

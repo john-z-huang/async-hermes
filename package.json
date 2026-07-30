@@ -1,13 +1,45 @@
 {
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=25.5.0"
+  },
+  "bin": {
+    "hermes": "./bin/hermes.js"
+  },
   "scripts": {
     "generate:protocol": "./scripts/generate-protocol.sh",
-    "typecheck:protocol": "tsc --project client/tsconfig.json --noEmit"
+    "typecheck": "tsc --project client/tsconfig.json --noEmit",
+    "typecheck:protocol": "tsc --project client/tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format:check": "prettier --check client/src/rpc client/src/tui client/src/cli.tsx bin/hermes.js vite.config.ts eslint.config.js package.json",
+    "test": "vitest run",
+    "build:bundle": "vite build",
+    "build": "npm run build:bundle && node --build-sea sea-config.json && node scripts/sign-sea.js",
+    "tui": "npm run build && ./dist/hermes"
   },
   "devDependencies": {
-    "@grpc/grpc-js": "^1.14.3",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.17",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "ink-testing-library": "^4.0.0",
+    "prettier": "^3.9.6",
     "protobufjs": "^7.5.4",
     "ts-proto": "^2.12.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.8"
   }
 }

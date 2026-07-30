@@ -18,11 +18,11 @@ uv tool install --editable .
 安装后可以在任意目录直接运行：
 
 ```bash
-hermes
-hermes --running-mode one-shot --question "总结当前项目"
+py-hermes
+py-hermes --running-mode one-shot --question "总结当前项目"
 ```
 
-`--workspace` 省略时仍使用执行命令时的当前目录。源码变更会由可编辑安装立即生效；更新依赖后可执行 `uv tool install --editable . --force` 刷新工具环境。
+`py-hermes` 是原 Python CLI。`--workspace` 省略时仍使用执行命令时的当前目录。源码变更会由可编辑安装立即生效；更新依赖后可执行 `uv tool install --editable . --force` 刷新工具环境。
 
 原有入口继续兼容：
 
@@ -52,6 +52,41 @@ Node 父进程可调用 `hermes.v1.HermesAgent/HealthCheck`，在服务就绪时
 uv run python scripts/smoke_grpc_real_api.py
 ```
 
+## React TUI
+
+TUI 位于 Node.js/TypeScript workspace，使用 Vite 构建和 React Ink 渲染终端界面。先安装 Node 依赖：
+
+```bash
+npm install
+```
+
+分别执行质量检查、测试和构建：
+
+```bash
+npm run lint
+npm run format:check
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm run build` 会先将 TUI、生产依赖和项目代码打包为单一脚本，再使用 Node 原生 Single Executable Application（SEA）功能生成本机平台的 `dist/hermes` 可执行文件。构建环境需要 Node.js 25.5.0 或更高版本；不同操作系统与 CPU 架构必须分别构建，产物不应跨平台复用。
+
+先在另一个终端启动本地 gRPC 服务（本任务不负责 Python 子进程生命周期），再启动 TUI：
+
+```bash
+uv run hermes-grpc-server --port 50051
+npm run tui -- --address 127.0.0.1:50051
+```
+
+也可在构建后直接运行二进制文件：
+
+```bash
+./dist/hermes --address 127.0.0.1:50051
+```
+
+TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
+
 ## Workspace inspection tool
 
 The agent exposes workspace access as the strict `inspect_workspace` function
@@ -69,10 +104,10 @@ text-serialized tool calls are not supported.
 
 ## Running modes
 
-`hermes` defaults to an interactive `loop` session:
+`py-hermes` defaults to an interactive `loop` session:
 
 ```bash
-hermes
+py-hermes
 ```
 
 Enter one question per prompt. Empty input is ignored; enter `/exit` or `/quit`
@@ -80,7 +115,7 @@ to end the session. An optional `--question` is executed as the first turn
 before the program starts reading from standard input:
 
 ```bash
-hermes \
+py-hermes \
   --running-mode loop \
   --question "Summarize this project"
 ```
@@ -95,7 +130,7 @@ history, and history is discarded when the process exits.
 Use `one-shot` when exactly one request should run:
 
 ```bash
-hermes \
+py-hermes \
   --running-mode one-shot \
   --question "Summarize this project"
 ```

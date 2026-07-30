@@ -462,11 +462,11 @@ class CliTests:
     def test_main_py_remains_compatible_entrypoint(self) -> None:
         self.assertIs(main.main, cli.main)
 
-    def test_pyproject_exposes_hermes_console_script(self) -> None:
+    def test_pyproject_exposes_py_hermes_console_script(self) -> None:
         import tomllib
 
         project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(
-            project["project"]["scripts"]["hermes"],
+            project["project"]["scripts"]["py-hermes"],
             "hermes.interfaces.cli:main",
         )
