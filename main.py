@@ -81,6 +81,7 @@ DEFAULT_AGENT_PERMISSIONS = AgentPermissions(
 )
 PERMISSION_PROFILES = {"read-only": DEFAULT_AGENT_PERMISSIONS}
 ReasonEffect = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+RunningMode = Literal["loop", "one-shot"]
 REASON_EFFECTS: tuple[ReasonEffect, ...] = (
     "minimal",
     "low",
@@ -463,8 +464,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--question",
-        required=True,
-        help="要交给 Code Agent 执行的任务（必填）。",
+        default=None,
+        help="要交给 Code Agent 执行的任务；loop 模式下省略时等待交互输入。",
+    )
+    parser.add_argument(
+        "--running-mode",
+        choices=("loop", "one-shot"),
+        default="loop",
+        help="运行模式：持续交互的 loop（默认）或执行一次后退出的 one-shot。",
     )
     parser.add_argument(
         "--system-prompt",
@@ -529,18 +536,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Agent 权限配置；当前仅支持 read-only（默认）。",
     )
     args = parser.parse_args(argv)
+    if args.running_mode == "one-shot" and (
+        args.question is None or not args.question.strip()
+    ):
+        parser.error("--running-mode one-shot 要求提供非空的 --question")
     if args.enable_reasoning and args.reason_effect not in REASON_EFFECTS:
         parser.error(f"--reason-effect 必须是以下值之一：{', '.join(REASON_EFFECTS)}")
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    """Run the command-line application."""
-    args = parse_args(argv)
+def _run_and_persist(args: argparse.Namespace, question: str) -> None:
+    """Run and persist one question using the process-level configuration."""
     captured_response = StringIO()
     output = asyncio.run(
         run_code_agent(
-            question=args.question,
+            question=question,
             system_prompt=args.system_prompt,
             user_prompt=args.user_prompt,
             content=args.content,
@@ -561,6 +571,41 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not args.enable_stream_output:
         print(output)
     print(f"响应结果已保存到：{output_path}")
+
+
+def _run_loop(args: argparse.Namespace) -> None:
+    """Read and execute questions until stdin closes or an exit command is entered."""
+    pending_question = args.question
+    while True:
+        if pending_question is not None:
+            question = pending_question
+            pending_question = None
+        else:
+            try:
+                question = input("question> ")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return
+
+        normalized_question = question.strip()
+        if normalized_question.casefold() in {"/exit", "/quit"}:
+            return
+        if not normalized_question:
+            continue
+
+        try:
+            _run_and_persist(args, normalized_question)
+        except Exception as error:
+            print(f"本轮请求失败：{error}", file=sys.stderr)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the command-line application."""
+    args = parse_args(argv)
+    if args.running_mode == "one-shot":
+        _run_and_persist(args, args.question)
+    else:
+        _run_loop(args)
 
 
 if __name__ == "__main__":

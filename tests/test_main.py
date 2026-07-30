@@ -376,14 +376,38 @@ class RunCodeAgentTests(unittest.IsolatedAsyncioTestCase):
 class ParseArgsTests(unittest.TestCase):
     def test_new_arguments_use_expected_defaults(self) -> None:
         with patch("main.Path.cwd", return_value=Path("/tmp")):
-            args = main.parse_args(["--question", "test"])
+            args = main.parse_args([])
 
+        self.assertEqual(args.running_mode, "loop")
+        self.assertIsNone(args.question)
         self.assertTrue(args.enable_stream_output)
         self.assertFalse(args.enable_reasoning)
         self.assertEqual(args.reason_effect, "medium")
         self.assertEqual(args.workspace, Path("/tmp").resolve())
         self.assertIsNone(args.output_file)
         self.assertEqual(args.permissions, "read-only")
+
+    def test_accepts_one_shot_with_a_question(self) -> None:
+        args = main.parse_args(
+            ["--running-mode", "one-shot", "--question", "test"]
+        )
+
+        self.assertEqual(args.running_mode, "one-shot")
+        self.assertEqual(args.question, "test")
+
+    def test_rejects_one_shot_without_a_non_empty_question(self) -> None:
+        for question_args in ([], ["--question", "   "]):
+            with self.subTest(question_args=question_args):
+                with redirect_stderr(StringIO()):
+                    with self.assertRaises(SystemExit):
+                        main.parse_args(
+                            ["--running-mode", "one-shot", *question_args]
+                        )
+
+    def test_rejects_unknown_running_mode(self) -> None:
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit):
+                main.parse_args(["--running-mode", "forever"])
 
     def test_accepts_disabled_stream_output(self) -> None:
         args = main.parse_args(
@@ -539,6 +563,8 @@ class TestMain:
                 [
                     "--question",
                     "test",
+                    "--running-mode",
+                    "one-shot",
                     "--workspace",
                     str(tmp_path),
                 ]
@@ -569,6 +595,8 @@ class TestMain:
                 [
                     "--question",
                     "test",
+                    "--running-mode",
+                    "one-shot",
                     "--enable-stream-output",
                     "false",
                     "--workspace",
@@ -586,3 +614,59 @@ class TestMain:
             "[reasoning]\ncareful analysis\n[content]\ncomplete response\n"
         )
         assert run_code_agent.await_args.kwargs["output_stream"] is None
+
+    def test_loop_runs_initial_and_interactive_questions_then_exits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        run_and_persist = unittest.mock.Mock()
+
+        with (
+            patch("main._run_and_persist", run_and_persist),
+            patch("builtins.input", side_effect=["second", "/exit"]),
+        ):
+            main.main(
+                [
+                    "--question",
+                    "first",
+                    "--workspace",
+                    str(tmp_path),
+                ]
+            )
+
+        assert [call.args[1] for call in run_and_persist.call_args_list] == [
+            "first",
+            "second",
+        ]
+
+    def test_loop_ignores_empty_input_and_quit_command(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        run_and_persist = unittest.mock.Mock()
+
+        with (
+            patch("main._run_and_persist", run_and_persist),
+            patch("builtins.input", side_effect=["", "   ", "/quit"]),
+        ):
+            main.main(["--workspace", str(tmp_path)])
+
+        run_and_persist.assert_not_called()
+
+    def test_loop_reports_a_failed_turn_and_continues(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        run_and_persist = unittest.mock.Mock(
+            side_effect=[RuntimeError("provider unavailable"), None]
+        )
+
+        with (
+            patch("main._run_and_persist", run_and_persist),
+            patch("builtins.input", side_effect=["first", "second", "/exit"]),
+        ):
+            main.main(["--workspace", str(tmp_path)])
+
+        assert run_and_persist.call_count == 2
+        assert "本轮请求失败：provider unavailable" in capsys.readouterr().err
