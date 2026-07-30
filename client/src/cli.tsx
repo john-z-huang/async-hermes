@@ -32,6 +32,7 @@ async function main(): Promise<void> {
     console.error(`Hermes 运行时异常：${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
     app?.unmount();
+    void lifecycle.stop();
   };
   process.on("SIGINT", stopForSignal);
   process.on("SIGTERM", stopForSignal);

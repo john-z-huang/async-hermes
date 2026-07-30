@@ -18,6 +18,8 @@ describe("verifyHealthCheck", () => {
       "服务尚未就绪。",
     );
     expect(() => verifyHealthCheck({ ...serving, protocolVersion: "v2" })).toThrow(RpcProtocolError);
-    expect(() => verifyHealthCheck({ ...serving, protocolVersion: "v2" })).toThrow("协议版本不兼容：期望 v1，收到 v2。");
+    expect(() => verifyHealthCheck({ ...serving, protocolVersion: "v2" })).toThrow(
+      "协议版本不兼容：期望 v1，收到 v2。",
+    );
   });
 });

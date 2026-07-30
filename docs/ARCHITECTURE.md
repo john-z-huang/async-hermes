@@ -155,6 +155,29 @@ loop 与 one-shot 创建方式不同，但复用同一个 `AgentService.run_turn
 - 仅绑定 `127.0.0.1`、`::1` 或 `localhost`，默认由系统分配临时端口；
 - 在关闭时先停止接收请求、取消活跃 Turn，再停止 gRPC 监听器。
 
+## Node-Python 生命周期
+
+Node CLI 是本地交互模式的父进程。默认状态机如下：
+
+```text
+启动 Node
+  → 以参数数组启动 Python（127.0.0.1、端口 0、--startup-handshake）
+  → 等待 stdout 的单行 JSON 握手
+  → HealthCheck + 协议版本校验
+  → 渲染 TUI
+  → 正常退出 / SIGINT / SIGTERM / 未捕获异常
+  → 关闭 gRPC client，发送 SIGTERM，超时后 SIGKILL
+```
+
+Python 的普通日志保留在 stderr；仅 `--startup-handshake` 会向 stdout 输出一条形如
+`{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}` 的记录。
+Node 拒绝非 loopback 地址、无效握手、启动期退出、超时、未就绪状态和协议版本不兼容，且
+不会进入可交互状态。Python 也监听 `SIGINT` 与 `SIGTERM`，进入既有的优雅关闭流程。
+
+开发模式通过 `uv run hermes-grpc-server` 启动。打包模式不自动搜索运行时，必须由安装器提供
+`HERMES_PYTHON_EXECUTABLE`；该可执行文件以 `-m hermes.interfaces.grpc_server` 启动。显式
+`--address` 或 `HERMES_GRPC_ADDRESS` 仍可连接调试用的既有本地 Server，此模式不接管其生命周期。
+
 它通过 `HermesGrpcServer` 管理生命周期，并可用 `hermes-grpc-server` 独立启动。`HealthCheck` 在接收新 Turn 时返回 `SERVING`；开始关闭后内部状态转为 `NOT_SERVING`。
 
 ## 一轮请求的执行流程

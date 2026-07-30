@@ -58,21 +58,44 @@ describe("PythonServerLifecycle", () => {
 
   it("拒绝不安全地址和提前退出", async () => {
     const unsafe = new FakeChild();
-    const lifecycle = new PythonServerLifecycle({ command: { executable: "uv", args: [] }, spawn: () => unsafe as never });
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "uv", args: [] },
+      spawn: () => unsafe as never,
+    });
     const starting = lifecycle.start();
     unsafe.stdout.write('{"type":"hermes-started","address":"0.0.0.0:1","protocol_version":"v1"}\n');
     await expect(starting).rejects.toThrow("启动地址不安全");
 
     const exited = new FakeChild();
-    const exiting = new PythonServerLifecycle({ command: { executable: "uv", args: [] }, spawn: () => exited as never }).start();
+    const exiting = new PythonServerLifecycle({
+      command: { executable: "uv", args: [] },
+      spawn: () => exited as never,
+    }).start();
     exited.emit("exit", 1, null);
     await expect(exiting).rejects.toBeInstanceOf(PythonServerStartupError);
   });
 
   it("开发模式使用临时端口和受控握手", () => {
-    expect(developmentPythonServerCommand("config.json5")).toEqual({
+    expect(developmentPythonServerCommand("config.json5", undefined)).toEqual({
       executable: "uv",
-      args: ["run", "hermes-grpc-server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake", "--config", "config.json5"],
+      args: [
+        "run",
+        "hermes-grpc-server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--startup-handshake",
+        "--config",
+        "config.json5",
+      ],
+    });
+  });
+
+  it("打包运行时仅使用明确指定的 Python 可执行文件", () => {
+    expect(developmentPythonServerCommand(undefined, "/app/runtime/python")).toEqual({
+      executable: "/app/runtime/python",
+      args: ["-m", "hermes.interfaces.grpc_server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
     });
   });
 

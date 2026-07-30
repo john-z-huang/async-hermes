@@ -15,13 +15,23 @@ export interface PythonServerCommand {
   args: string[];
 }
 
-export function developmentPythonServerCommand(configPath?: string): PythonServerCommand {
-  const args = ["run", "hermes-grpc-server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake"];
-  if (configPath) args.push("--config", configPath);
-  return { executable: process.env.HERMES_PYTHON_EXECUTABLE || "uv", args };
+export function developmentPythonServerCommand(
+  configPath?: string,
+  pythonExecutable = process.env.HERMES_PYTHON_EXECUTABLE,
+): PythonServerCommand {
+  const serverArgs = ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"];
+  if (configPath) serverArgs.push("--config", configPath);
+  if (pythonExecutable)
+    return { executable: pythonExecutable, args: ["-m", "hermes.interfaces.grpc_server", ...serverArgs] };
+  const args = ["run", "hermes-grpc-server", ...serverArgs];
+  return { executable: "uv", args };
 }
 
-type Spawn = (command: string, args: readonly string[], options: { env: NodeJS.ProcessEnv; stdio: "pipe" }) => ChildProcess;
+type Spawn = (
+  command: string,
+  args: readonly string[],
+  options: { env: NodeJS.ProcessEnv; stdio: "pipe" },
+) => ChildProcess;
 
 export interface PythonServerLifecycleOptions {
   command: PythonServerCommand;
