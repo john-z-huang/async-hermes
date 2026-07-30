@@ -1,14 +1,7 @@
 import type { AgentEvent, RpcError } from "../generated/v1/agent.js";
 
 export type DisplayEventKind =
-  | "content"
-  | "reasoning"
-  | "tool-started"
-  | "tool-finished"
-  | "artifact"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "content" | "reasoning" | "tool-started" | "tool-finished" | "artifact" | "completed" | "failed" | "cancelled";
 
 export interface DisplayEvent {
   kind: DisplayEventKind;
@@ -48,10 +41,22 @@ function errorText(error: RpcError | undefined): string {
 function displayEvent(event: AgentEvent): DisplayEvent | undefined {
   if (event.contentDelta) return { kind: "content", text: event.contentDelta.text, sequence: event.sequence };
   if (event.reasoningDelta) return { kind: "reasoning", text: event.reasoningDelta.text, sequence: event.sequence };
-  if (event.toolStarted) return { kind: "tool-started", text: `${event.toolStarted.toolName}: ${event.toolStarted.summary}`, sequence: event.sequence };
-  if (event.toolFinished) return { kind: "tool-finished", text: `${event.toolFinished.toolName}: ${event.toolFinished.summary}`, sequence: event.sequence };
-  if (event.artifactCreated) return { kind: "artifact", text: event.artifactCreated.displayName, sequence: event.sequence };
-  if (event.turnCompleted) return { kind: "completed", text: event.turnCompleted.finalOutput, sequence: event.sequence };
+  if (event.toolStarted)
+    return {
+      kind: "tool-started",
+      text: `${event.toolStarted.toolName}: ${event.toolStarted.summary}`,
+      sequence: event.sequence,
+    };
+  if (event.toolFinished)
+    return {
+      kind: "tool-finished",
+      text: `${event.toolFinished.toolName}: ${event.toolFinished.summary}`,
+      sequence: event.sequence,
+    };
+  if (event.artifactCreated)
+    return { kind: "artifact", text: event.artifactCreated.displayName, sequence: event.sequence };
+  if (event.turnCompleted)
+    return { kind: "completed", text: event.turnCompleted.finalOutput, sequence: event.sequence };
   if (event.turnFailed) return { kind: "failed", text: errorText(event.turnFailed.error), sequence: event.sequence };
   if (event.turnCancelled) return { kind: "cancelled", text: "本轮已取消。", sequence: event.sequence };
   return undefined;

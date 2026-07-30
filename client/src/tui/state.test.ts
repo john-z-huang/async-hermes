@@ -27,7 +27,9 @@ describe("TUI state", () => {
   it("以结构化错误作为终态", () => {
     const afterStart = applyAgentEvent(initialTuiState, started);
     const failed = applyAgentEvent(afterStart, {
-      sessionId: "session-1", turnId: "turn-1", sequence: 2,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      sequence: 2,
       turnFailed: { error: { code: 7, message: "服务内部错误。", retryable: true } },
     });
     expect(failed.turns["turn-1"].terminal).toBe(true);

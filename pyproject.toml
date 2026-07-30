@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hermes = "hermes.interfaces.cli:main"
+py-hermes = "hermes.interfaces.cli:main"
 hermes-grpc-server = "hermes.interfaces.grpc_server:main"
 
 [build-system]

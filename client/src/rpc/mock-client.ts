@@ -12,6 +12,8 @@ export class MockHermesClient implements HermesRpcClient {
   }
 
   public runTurn(_sessionId: string, _userInput: string): TurnSubscription {
+    void _sessionId;
+    void _userInput;
     return {
       events: (async function* (events: AgentEvent[]) {
         yield* events;

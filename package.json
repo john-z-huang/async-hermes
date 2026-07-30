@@ -9,7 +9,7 @@
     "typecheck": "tsc --project client/tsconfig.json --noEmit",
     "typecheck:protocol": "tsc --project client/tsconfig.json --noEmit",
     "lint": "eslint .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --check client/src/rpc client/src/tui client/src/cli.tsx bin/hermes.js vite.config.ts eslint.config.js package.json",
     "test": "vitest run",
     "build": "vite build",
     "tui": "npm run build && node ./bin/hermes.js"

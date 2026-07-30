@@ -37,9 +37,7 @@ export interface HermesRpcClient {
 
 function toRpcError(error: ServiceError): Error {
   const message = error.details || error.message || "RPC 调用失败。";
-  return error.code === 14 || error.code === 4
-    ? new RpcConnectionError(message)
-    : new RpcServiceError(message);
+  return error.code === 14 || error.code === 4 ? new RpcConnectionError(message) : new RpcServiceError(message);
 }
 
 async function* streamEvents(stream: ClientReadableStream<AgentEvent>): AsyncIterable<AgentEvent> {
