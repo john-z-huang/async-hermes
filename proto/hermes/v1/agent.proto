@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package hermes.v1;
+
+option java_multiple_files = true;
+option java_package = "com.hermes.v1";
+
+// HermesAgent 是 Node 交互层与 Python Agent Service 之间的稳定边界。
+// 公开消息只表达 Hermes 领域概念，绝不传输模型 SDK 的原始对象。
+service HermesAgent {
+  rpc CreateSession(CreateSessionRequest) returns (Session);
+  rpc RunTurn(RunTurnRequest) returns (stream AgentEvent);
+  rpc CancelTurn(CancelTurnRequest) returns (CancelTurnResponse);
+  rpc GetSession(GetSessionRequest) returns (SessionSnapshot);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message CreateSessionRequest {
+  // 未设置时由 Python 服务生成标识；设置时必须在当前服务实例中唯一。
+  optional string session_id = 1;
+}
+
+message Session {
+  string session_id = 1;
+  SessionStatus status = 2;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+}
+
+message RunTurnRequest {
+  string session_id = 1;
+  string user_input = 2;
+  // 仅用于客户端关联；服务端仍生成权威 turn_id。
+  optional string client_turn_id = 3;
+}
+
+message CancelTurnRequest {
+  string session_id = 1;
+  string turn_id = 2;
+}
+
+message CancelTurnResponse {
+  CancelResult result = 1;
+  // 仅在请求不能被接受时设置；敏感内部异常绝不放入 error。
+  optional RpcError error = 2;
+}
+
+enum CancelResult {
+  CANCEL_RESULT_UNSPECIFIED = 0;
+  CANCEL_RESULT_ACCEPTED = 1;
+  CANCEL_RESULT_ALREADY_TERMINAL = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message SessionSnapshot {
+  string session_id = 1;
+  SessionStatus status = 2;
+  repeated TurnSummary turns = 3;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated SessionSnapshot sessions = 1;
+}
+
+message TurnSummary {
+  string turn_id = 1;
+  TurnStatus status = 2;
+}
+
+enum TurnStatus {
+  TURN_STATUS_UNSPECIFIED = 0;
+  TURN_STATUS_RUNNING = 1;
+  TURN_STATUS_COMPLETED = 2;
+  TURN_STATUS_FAILED = 3;
+  TURN_STATUS_CANCELLED = 4;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  ServingStatus status = 1;
+  string protocol_version = 2;
+}
+
+enum ServingStatus {
+  SERVING_STATUS_UNSPECIFIED = 0;
+  SERVING_STATUS_SERVING = 1;
+  SERVING_STATUS_NOT_SERVING = 2;
+}
+
+// 同一 turn 内 sequence 从 1 开始严格递增，且恰有一个终态 payload。
+message AgentEvent {
+  string session_id = 1;
+  string turn_id = 2;
+  uint64 sequence = 3;
+
+  oneof payload {
+    TurnStarted turn_started = 10;
+    TextDelta content_delta = 11;
+    TextDelta reasoning_delta = 12;
+    ToolStarted tool_started = 13;
+    ToolFinished tool_finished = 14;
+    ArtifactCreated artifact_created = 15;
+    TurnCompleted turn_completed = 16;
+    TurnFailed turn_failed = 17;
+    TurnCancelled turn_cancelled = 18;
+  }
+}
+
+message TurnStarted {}
+
+message TextDelta {
+  string text = 1;
+}
+
+message ToolStarted {
+  string tool_name = 1;
+  string summary = 2;
+}
+
+message ToolFinished {
+  string tool_name = 1;
+  string summary = 2;
+  ToolStatus status = 3;
+}
+
+enum ToolStatus {
+  TOOL_STATUS_UNSPECIFIED = 0;
+  TOOL_STATUS_SUCCEEDED = 1;
+  TOOL_STATUS_FAILED = 2;
+}
+
+message ArtifactCreated {
+  string artifact_id = 1;
+  string display_name = 2;
+  string media_type = 3;
+}
+
+message TurnCompleted {
+  string final_output = 1;
+}
+
+message TurnFailed {
+  RpcError error = 1;
+}
+
+message TurnCancelled {}
+
+// 稳定、可展示且不含凭据、环境变量、堆栈或 SDK 原始错误的错误表达。
+message RpcError {
+  ErrorCode code = 1;
+  string message = 2;
+  bool retryable = 3;
+  optional string debug_reference = 4;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_ARGUMENT = 1;
+  ERROR_CODE_SESSION_NOT_FOUND = 2;
+  ERROR_CODE_TURN_NOT_FOUND = 3;
+  ERROR_CODE_TURN_ALREADY_RUNNING = 4;
+  ERROR_CODE_PROVIDER_UNAVAILABLE = 5;
+  ERROR_CODE_TOOL_FAILED = 6;
+  ERROR_CODE_INTERNAL = 7;
+}
