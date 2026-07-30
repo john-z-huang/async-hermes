@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "scripts": {
+    "generate:protocol": "./scripts/generate-protocol.sh",
+    "typecheck:protocol": "tsc --project client/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@grpc/grpc-js": "^1.14.3",
+    "protobufjs": "^7.5.4",
+    "ts-proto": "^2.12.0",
+    "typescript": "^5.9.3"
+  }
+}

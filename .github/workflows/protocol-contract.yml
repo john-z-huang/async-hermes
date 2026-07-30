@@ -1,0 +1,33 @@
+name: Hermes 协议契约
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-contract:
+    name: 验证 Protobuf 协议与生成类型
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 获取协议兼容性基线
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - uses: astral-sh/setup-uv@v7
+      - uses: bufbuild/buf-setup-action@v1
+      - name: 安装 Protobuf 编译器
+        run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
+      - run: npm ci
+      - run: uv sync --group dev
+      - run: HERMES_PROTOCOL_BASELINE_REF=origin/main ./scripts/check-protocol.sh
+      - run: uv run pytest tests/protocol tests/generated
