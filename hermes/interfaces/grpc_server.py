@@ -14,8 +14,15 @@ from uuid import uuid4
 import grpc
 
 from hermes.application import AgentService
+from hermes.config import ConfigError, HermesConfig, load_config
 from hermes.domain import AgentEvent, AgentEventType, TurnStatus
-from hermes.infrastructure.agents_sdk_runner import AgentsSdkRunner
+from hermes.infrastructure.agents_sdk_runner import (
+    AgentsSdkRunner,
+    AgentsSdkRunnerConfig,
+    DEFAULT_REASON_EFFECT,
+    SYSTEM_PROMPT,
+    USER_PROMPT,
+)
 
 from .generated.v1 import agent_pb2
 
@@ -256,8 +263,20 @@ class HermesGrpcServer:
         await self._server.wait_for_termination()
 
 
-async def _serve(host: str, port: int) -> None:
-    server = HermesGrpcServer(AgentService(AgentsSdkRunner()), host=host, port=port)
+async def _serve(host: str, port: int, config: HermesConfig | None = None) -> None:
+    agent = config.agent if config is not None else None
+    runner = AgentsSdkRunner(
+        AgentsSdkRunnerConfig(
+            workspace=agent.workspace if agent and agent.workspace is not None else None,
+            permissions=agent.permissions if agent and agent.permissions is not None else "read-only",
+            enable_reasoning=agent.enable_reasoning if agent and agent.enable_reasoning is not None else False,
+            reason_effect=agent.reason_effect if agent and agent.reason_effect is not None else DEFAULT_REASON_EFFECT,
+            system_prompt=agent.system_prompt if agent and agent.system_prompt is not None else SYSTEM_PROMPT,
+            user_prompt=agent.user_prompt if agent and agent.user_prompt is not None else USER_PROMPT,
+            content=agent.content if agent and agent.content is not None else "",
+        )
+    )
+    server = HermesGrpcServer(AgentService(runner), host=host, port=port)
     await server.start()
     try:
         await server.wait_for_termination()
@@ -267,13 +286,23 @@ async def _serve(host: str, port: int) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     """可独立启动的本地 gRPC server 入口。"""
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config")
+    config_args, _ = config_parser.parse_known_args(argv)
+    config: HermesConfig | None = None
+    if config_args.config is not None:
+        try:
+            config = load_config(config_args.config)
+        except ConfigError as error:
+            config_parser.error(str(error))
     parser = argparse.ArgumentParser(description="启动 Hermes 本地 gRPC Server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--config", default=config_args.config)
+    parser.add_argument("--host", default=config.rpc.host if config is not None else "127.0.0.1")
+    parser.add_argument("--port", type=int, default=config.rpc.port if config is not None else 0)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        asyncio.run(_serve(args.host, args.port))
+        asyncio.run(_serve(args.host, args.port, config))
     except KeyboardInterrupt:
         return
 

@@ -1,0 +1,18 @@
+// Hermes 非敏感运行配置示例。请勿在此文件存放 API key、令牌或密码。
+{
+  version: 1,
+  rpc: {
+    host: "127.0.0.1",
+    port: 50051,
+    startupTimeoutMs: 10000,
+  },
+  agent: {
+    workspace: ".",
+    permissions: "read-only",
+    enableReasoning: false,
+    reasonEffect: "medium",
+  },
+  tui: {
+    showReasoning: false,
+  },
+}

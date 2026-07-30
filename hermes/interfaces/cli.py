@@ -11,6 +11,7 @@ import sys
 from typing import TextIO
 
 from hermes.application import AgentService
+from hermes.config import ConfigError, HermesConfig, load_config
 from hermes.domain import AgentEvent, AgentEventType
 from hermes.infrastructure.agents_sdk_runner import (
     AgentsSdkRunner,
@@ -118,35 +119,47 @@ def _workspace_argument(value: str) -> Path:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """解析命令行参数。"""
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=Path)
+    config_args, _ = config_parser.parse_known_args(argv)
+    config: HermesConfig | None = None
+    if config_args.config is not None:
+        try:
+            config = load_config(config_args.config)
+        except ConfigError as error:
+            config_parser.error(str(error))
+    agent_config = config.agent if config is not None else None
     parser = argparse.ArgumentParser(
         description="Run a simple Code Agent with the OpenAI Agents SDK."
     )
+    parser.add_argument("--config", type=Path, default=config_args.config)
     parser.add_argument("--question", default=None)
     parser.add_argument(
         "--running-mode", choices=("loop", "one-shot"), default="loop"
     )
-    parser.add_argument("--system-prompt", default=SYSTEM_PROMPT)
-    parser.add_argument("--user-prompt", default=USER_PROMPT)
-    parser.add_argument("--content", default="")
+    parser.add_argument("--system-prompt", default=agent_config.system_prompt if agent_config and agent_config.system_prompt is not None else SYSTEM_PROMPT)
+    parser.add_argument("--user-prompt", default=agent_config.user_prompt if agent_config and agent_config.user_prompt is not None else USER_PROMPT)
+    parser.add_argument("--content", default=agent_config.content if agent_config and agent_config.content is not None else "")
     parser.add_argument(
         "--enable-stream-output",
         nargs="?", const=True, type=_parse_boolean, default=True,
     )
     parser.add_argument(
         "--enable-reasoning",
-        nargs="?", const=True, type=_parse_boolean, default=False,
+        nargs="?", const=True, type=_parse_boolean,
+        default=agent_config.enable_reasoning if agent_config and agent_config.enable_reasoning is not None else False,
     )
-    parser.add_argument("--reason-effect", default=DEFAULT_REASON_EFFECT)
+    parser.add_argument("--reason-effect", default=agent_config.reason_effect if agent_config and agent_config.reason_effect is not None else DEFAULT_REASON_EFFECT)
     parser.add_argument(
         "--workspace",
         type=_workspace_argument,
-        default=Path.cwd().resolve(),
+        default=agent_config.workspace if agent_config and agent_config.workspace is not None else Path.cwd().resolve(),
     )
     parser.add_argument("--output-file", default=None)
     parser.add_argument(
         "--permissions",
         choices=tuple(PERMISSION_PROFILES),
-        default="read-only",
+        default=agent_config.permissions if agent_config and agent_config.permissions is not None else "read-only",
     )
     args = parser.parse_args(argv)
     if args.running_mode == "one-shot" and (
