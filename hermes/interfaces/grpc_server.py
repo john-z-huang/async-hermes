@@ -25,6 +25,7 @@ from hermes.infrastructure.agents_sdk_runner import (
     SYSTEM_PROMPT,
     USER_PROMPT,
 )
+from hermes.release import RELEASE_MANIFEST
 
 from .generated.v1 import agent_pb2
 
@@ -35,7 +36,7 @@ from .generated.v1 import agent_pb2_grpc
 
 
 LOGGER = logging.getLogger(__name__)
-PROTOCOL_VERSION: Final = "v1"
+PROTOCOL_VERSION: Final = RELEASE_MANIFEST.protocol_version
 LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -77,7 +78,13 @@ def write_startup_handshake(output: TextIO, address: str) -> None:
     """向父进程输出一条不含日志或配置的启动握手记录。"""
     output.write(
         json.dumps(
-            {"type": "hermes-started", "address": address, "protocol_version": PROTOCOL_VERSION},
+            {
+                "type": "hermes-started",
+                "address": address,
+                "protocol_version": PROTOCOL_VERSION,
+                "release_version": RELEASE_MANIFEST.release_version,
+                "python_package_version": RELEASE_MANIFEST.python_package_version,
+            },
             separators=(",", ":"),
         )
         + "\n"

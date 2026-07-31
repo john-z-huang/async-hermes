@@ -11,6 +11,7 @@ import pytest
 
 from hermes.application import AgentService, RunnerEvent, RunnerEventType, TurnRequest
 from hermes.interfaces.grpc_server import HermesGrpcServer, write_startup_handshake
+from hermes.release import RELEASE_MANIFEST
 from hermes.interfaces.generated.v1 import agent_pb2, agent_pb2_grpc
 
 
@@ -137,7 +138,7 @@ async def test_all_rpcs_and_successful_ordered_stream() -> None:
         sessions = await harness.stub.ListSessions(agent_pb2.ListSessionsRequest())
         assert [session.session_id for session in sessions.sessions] == ["one"]
         health = await harness.stub.HealthCheck(agent_pb2.HealthCheckRequest())
-        assert (health.status, health.protocol_version) == (agent_pb2.SERVING_STATUS_SERVING, "v1")
+        assert (health.status, health.protocol_version) == (agent_pb2.SERVING_STATUS_SERVING, RELEASE_MANIFEST.protocol_version)
     finally:
         await harness.close()
 
@@ -266,6 +267,8 @@ def test_startup_handshake_is_machine_readable_and_contains_no_configuration() -
 
     assert json.loads(output.getvalue()) == {
         "address": "127.0.0.1:54321",
-        "protocol_version": "v1",
+        "protocol_version": RELEASE_MANIFEST.protocol_version,
+        "python_package_version": RELEASE_MANIFEST.python_package_version,
+        "release_version": RELEASE_MANIFEST.release_version,
         "type": "hermes-started",
     }

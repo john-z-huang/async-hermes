@@ -50,7 +50,7 @@ describe("PythonServerLifecycle", () => {
       createClient: () => client(serving),
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
 
     await expect(starting).resolves.toBeDefined();
     expect(invoked).toEqual(["run", "hermes-grpc-server"]);
@@ -65,7 +65,7 @@ describe("PythonServerLifecycle", () => {
       spawn: () => unsafe as never,
     });
     const starting = lifecycle.start();
-    unsafe.stdout.write('{"type":"hermes-started","address":"0.0.0.0:1","protocol_version":"v1"}\n');
+    unsafe.stdout.write('{"type":"hermes-started","address":"0.0.0.0:1","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await expect(starting).rejects.toThrow("启动地址不安全");
 
     const exited = new FakeChild();
@@ -75,6 +75,19 @@ describe("PythonServerLifecycle", () => {
     }).start();
     exited.emit("exit", 1, null);
     await expect(exiting).rejects.toBeInstanceOf(PythonServerStartupError);
+  });
+
+  it("拒绝版本不匹配的 Python Server", async () => {
+    const child = new FakeChild();
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "hermes-server", args: [] },
+      spawn: () => child as never,
+    });
+    const starting = lifecycle.start();
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.2.0","python_package_version":"0.2.0"}\n');
+
+    await expect(starting).rejects.toThrow("Python Server 版本不兼容");
+    expect(child.signals).toEqual(["SIGTERM"]);
   });
 
   it("启动超时后回收子进程", async () => {
@@ -101,7 +114,7 @@ describe("PythonServerLifecycle", () => {
       },
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await starting;
 
     child.emit("exit", 23, null);
@@ -141,7 +154,7 @@ describe("PythonServerLifecycle", () => {
       createClient: () => client(serving),
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await starting;
 
     lifecycle.forceStop();

@@ -1,6 +1,7 @@
 import { ServingStatus, type HealthCheckResponse } from "../generated/v1/agent.js";
+import { releaseManifest } from "../release.js";
 
-export const PROTOCOL_VERSION = "v1";
+export const PROTOCOL_VERSION = releaseManifest.protocol_version;
 
 /** 启动期握手失败：调用方应停止进入可交互状态。 */
 export class RpcProtocolError extends Error {
