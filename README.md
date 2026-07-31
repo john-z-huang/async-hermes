@@ -127,6 +127,35 @@ TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史�
 正常退出、`SIGINT`、`SIGTERM` 或未捕获异常都会关闭 gRPC client，并向 Python 发送
 `SIGTERM`；超时后升级为 `SIGKILL`。连续第二次中断会立即强制回收子进程。
 
+## 测试层级
+
+Hermes 的默认自动化测试不访问真实模型 API，也不要求 `OPENAI_API_KEY`。各层可独立运行：
+
+```bash
+# Python Core、配置和真实 Python gRPC Server
+uv run pytest tests/test_main.py tests/test_config.py tests/test_grpc_server.py
+
+# Protobuf lint、破坏性变更和生成代码一致性
+./scripts/check-protocol.sh
+uv run pytest tests/protocol tests/generated
+
+# Node RPC、TUI 和进程生命周期单元测试
+npm test
+
+# Node 客户端到独立 Python Server 进程的跨语言测试
+npm run test:cross-language
+```
+
+`npm run test:all` 会依次运行 Node 单元测试和跨语言测试。跨语言测试使用系统分配的
+loopback 临时端口，启动 `tests/fixtures/cross_language_server.py`，并复用生产
+`HermesGrpcServer`、`AgentService` 和 Node `GrpcHermesClient`。测试 runner 只返回
+确定性事件，不初始化 Agents SDK、不读取模型凭据，也不访问外部网络；成功、失败、
+取消或进程崩溃后都会回收子进程。
+
+CI 将 Python、Node、跨语言进程测试作为三个独立 job 运行；Protobuf 协议兼容检查继续
+由 `Hermes 协议契约` 工作流负责。信号与子进程测试在支持 POSIX 信号的平台执行，
+核心 RPC、事件顺序、取消和资源清理语义不得静默跳过。
+
 ## Workspace inspection tool
 
 The agent exposes workspace access as the strict `inspect_workspace` function

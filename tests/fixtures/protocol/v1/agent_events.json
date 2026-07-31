@@ -1,0 +1,29 @@
+[
+  {
+    "name": "content_delta_v1",
+    "wire_hex": "0a017312017418015a040a026869",
+    "session_id": "s",
+    "turn_id": "t",
+    "sequence": 1,
+    "payload": "content_delta",
+    "text": "hi"
+  },
+  {
+    "name": "future_unknown_field",
+    "wire_hex": "0a017312017418015a040a026869a00601",
+    "session_id": "s",
+    "turn_id": "t",
+    "sequence": 1,
+    "payload": "content_delta",
+    "text": "hi"
+  },
+  {
+    "name": "future_unknown_event",
+    "wire_hex": "0a017312017418019a0100",
+    "session_id": "s",
+    "turn_id": "t",
+    "sequence": 1,
+    "payload": null,
+    "text": null
+  }
+]

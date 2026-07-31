@@ -12,8 +12,10 @@
     "typecheck": "tsc --project client/tsconfig.json --noEmit",
     "typecheck:protocol": "tsc --project client/tsconfig.json --noEmit",
     "lint": "eslint .",
-    "format:check": "prettier --check client/src/rpc client/src/tui client/src/cli.tsx bin/hermes.js vite.config.ts eslint.config.js package.json",
-    "test": "vitest run",
+    "format:check": "prettier --check client/src/rpc client/src/tui client/src/integration client/src/cli.tsx bin/hermes.js vite.config.ts eslint.config.js package.json",
+    "test": "vitest run --exclude client/src/integration/**",
+    "test:cross-language": "vitest run client/src/integration",
+    "test:all": "npm test && npm run test:cross-language",
     "build:bundle": "vite build",
     "build": "npm run build:bundle && node --build-sea sea-config.json && node scripts/sign-sea.js",
     "tui": "npm run build && ./dist/hermes"

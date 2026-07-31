@@ -35,4 +35,18 @@ describe("TUI state", () => {
     expect(failed.turns["turn-1"].terminal).toBe(true);
     expect(failed.turns["turn-1"].events[0]).toMatchObject({ kind: "failed", text: "服务内部错误。" });
   });
+
+  it("拒绝终态之后的增量事件", () => {
+    const afterStart = applyAgentEvent(initialTuiState, started);
+    const completed = applyAgentEvent(afterStart, {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      sequence: 2,
+      turnCompleted: { finalOutput: "完成" },
+    });
+    const late = applyAgentEvent(completed, { ...content, sequence: 3 });
+
+    expect(late.protocolError).toContain("无效 sequence 3");
+    expect(late.turns["turn-1"].events).toHaveLength(1);
+  });
 });

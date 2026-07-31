@@ -6,8 +6,11 @@ import {
   type HermesAgentClient as GeneratedHermesAgentClient,
   HermesAgentClient,
   type HealthCheckResponse,
+  type ListSessionsResponse,
   type Session,
+  type SessionSnapshot,
 } from "../generated/v1/agent.js";
+import { RpcProtocolError } from "./health-check.js";
 
 export class RpcConnectionError extends Error {
   public constructor(message: string) {
@@ -32,6 +35,8 @@ export interface TurnSubscription {
 export interface HermesRpcClient {
   healthCheck(): Promise<HealthCheckResponse>;
   createSession(sessionId?: string): Promise<Session>;
+  getSession(sessionId: string): Promise<SessionSnapshot>;
+  listSessions(): Promise<ListSessionsResponse>;
   runTurn(sessionId: string, userInput: string): TurnSubscription;
   cancelTurn(sessionId: string, turnId: string): Promise<CancelTurnResponse>;
   close(): void;
@@ -42,10 +47,16 @@ function toRpcError(error: ServiceError): Error {
   return error.code === 14 || error.code === 4 ? new RpcConnectionError(message) : new RpcServiceError(message);
 }
 
-async function* streamEvents(stream: ClientReadableStream<AgentEvent>): AsyncIterable<AgentEvent> {
+async function* streamEvents(
+  stream: ClientReadableStream<AgentEvent>,
+  expectedSessionId: string,
+): AsyncIterable<AgentEvent> {
   const buffered: AgentEvent[] = [];
   let completed = false;
   let failure: ServiceError | undefined;
+  let expectedSequence = 1;
+  let turnId: string | undefined;
+  let terminal = false;
   let wake: (() => void) | undefined;
   const notify = () => {
     wake?.();
@@ -66,7 +77,19 @@ async function* streamEvents(stream: ClientReadableStream<AgentEvent>): AsyncIte
   });
   while (!completed || buffered.length > 0) {
     if (buffered.length > 0) {
-      yield buffered.shift()!;
+      const event = buffered.shift()!;
+      const invalidIdentity =
+        event.sessionId !== expectedSessionId || !event.turnId || (turnId !== undefined && event.turnId !== turnId);
+      if (invalidIdentity || terminal || event.sequence !== expectedSequence) {
+        stream.cancel();
+        throw new RpcProtocolError(
+          `无效事件流：session=${event.sessionId} turn=${event.turnId} sequence=${event.sequence}。`,
+        );
+      }
+      turnId = event.turnId;
+      expectedSequence += 1;
+      terminal = Boolean(event.turnCompleted || event.turnFailed || event.turnCancelled);
+      yield event;
       continue;
     }
     await new Promise<void>((resolve) => {
@@ -102,9 +125,27 @@ export class GrpcHermesClient implements HermesRpcClient {
     });
   }
 
+  public getSession(sessionId: string): Promise<SessionSnapshot> {
+    return new Promise((resolve, reject) => {
+      this.client.getSession({ sessionId }, (error, response) => {
+        if (error) return reject(toRpcError(error));
+        resolve(response);
+      });
+    });
+  }
+
+  public listSessions(): Promise<ListSessionsResponse> {
+    return new Promise((resolve, reject) => {
+      this.client.listSessions({}, (error, response) => {
+        if (error) return reject(toRpcError(error));
+        resolve(response);
+      });
+    });
+  }
+
   public runTurn(sessionId: string, userInput: string): TurnSubscription {
     const stream = this.client.runTurn({ sessionId, userInput });
-    return { events: streamEvents(stream), cancel: () => stream.cancel() };
+    return { events: streamEvents(stream, sessionId), cancel: () => stream.cancel() };
   }
 
   public cancelTurn(sessionId: string, turnId: string): Promise<CancelTurnResponse> {

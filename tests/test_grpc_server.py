@@ -86,7 +86,29 @@ def async_test(test):
 @async_test
 async def test_all_rpcs_and_successful_ordered_stream() -> None:
     harness = GrpcHarness(FakeRunner([
-        RunnerEvent(RunnerEventType.CONTENT_DELTA, "answer"),
+        RunnerEvent(RunnerEventType.CONTENT_DELTA, "an"),
+        RunnerEvent(RunnerEventType.CONTENT_DELTA, "swer"),
+        RunnerEvent(RunnerEventType.REASONING_DELTA, "reason"),
+        RunnerEvent(
+            RunnerEventType.TOOL_STARTED,
+            data={"tool_name": "inspect_workspace", "summary": "读取文件"},
+        ),
+        RunnerEvent(
+            RunnerEventType.TOOL_FINISHED,
+            data={
+                "tool_name": "inspect_workspace",
+                "summary": "读取完成",
+                "status": "succeeded",
+            },
+        ),
+        RunnerEvent(
+            RunnerEventType.ARTIFACT_CREATED,
+            data={
+                "artifact_id": "artifact-1",
+                "display_name": "报告",
+                "media_type": "text/markdown",
+            },
+        ),
         RunnerEvent(RunnerEventType.COMPLETED, "answer", history=("history",)),
     ]))
     await harness.start()
@@ -94,9 +116,21 @@ async def test_all_rpcs_and_successful_ordered_stream() -> None:
         created = await harness.stub.CreateSession(agent_pb2.CreateSessionRequest(session_id="one"))
         events = await collect(harness.stub.RunTurn(agent_pb2.RunTurnRequest(session_id=created.session_id, user_input=" question ")))
 
-        assert [event.sequence for event in events] == [1, 2, 3]
-        assert [event.WhichOneof("payload") for event in events] == ["turn_started", "content_delta", "turn_completed"]
+        assert [event.sequence for event in events] == list(range(1, 9))
+        assert [event.WhichOneof("payload") for event in events] == [
+            "turn_started",
+            "content_delta",
+            "content_delta",
+            "reasoning_delta",
+            "tool_started",
+            "tool_finished",
+            "artifact_created",
+            "turn_completed",
+        ]
         assert len({event.turn_id for event in events}) == 1
+        assert events[4].tool_started.tool_name == "inspect_workspace"
+        assert events[5].tool_finished.status == agent_pb2.TOOL_STATUS_SUCCEEDED
+        assert events[6].artifact_created.media_type == "text/markdown"
         assert events[-1].turn_completed.final_output == "answer"
         snapshot = await harness.stub.GetSession(agent_pb2.GetSessionRequest(session_id="one"))
         assert [(turn.turn_id, turn.status) for turn in snapshot.turns] == [(events[0].turn_id, agent_pb2.TURN_STATUS_COMPLETED)]
