@@ -148,6 +148,7 @@ npm run build:release -- macos-arm64
 
 发布模式下 SEA TUI 仅从自身同目录启动 `hermes-server`，不会搜索用户机器上的 Python。源码开发模式
 仍通过 `uv run hermes-grpc-server` 启动服务。Python headless/one-shot 入口 `py-hermes` 保持可用。
+平台支持矩阵、安装、升级、回滚、卸载和故障排查见 [`docs/RELEASE.md`](docs/RELEASE.md)。
 
 TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
 正常退出、`SIGINT`、`SIGTERM` 或未捕获异常都会关闭 gRPC client，并向 Python 发送

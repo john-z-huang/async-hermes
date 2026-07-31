@@ -14,5 +14,6 @@ def test_release_build_uses_locked_toolchains_and_explicit_output() -> None:
     assert "release_manifest.json" in script
     assert "scripts/hermes_server_entry.py" in script
     assert "scripts/smoke_release_server.py" in script
+    assert "dist/hermes.exe" in script
     assert "uv run python scripts/package_release.py" in script
     assert '--output-dir "dist/release/$target"' in script
