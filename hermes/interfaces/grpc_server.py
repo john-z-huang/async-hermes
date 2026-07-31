@@ -102,13 +102,21 @@ def _turn_status(status: TurnStatus) -> int:
 
 
 def _safe_failure(error: Exception | str) -> agent_pb2.RpcError:
-    """把内部异常归类为稳定、不泄露底层内容的 RPC 错误。"""
+    """把内部异常归类为稳定、不泄露底层内容的 RPC 错误。
+
+    按优先级从高到低匹配异常特征，安全地映射到面向用户的诊断信息，
+    不在 RPC 消息中暴露 SDK 原始错误详情。
+    """
     name = error.__class__.__name__.casefold() if isinstance(error, Exception) else ""
     text = str(error).casefold()
     if "tool" in name or "tool" in text:
         return _error(agent_pb2.ERROR_CODE_TOOL_FAILED, "工具执行失败。")
-    if any(marker in name or marker in text for marker in ("provider", "rate", "connection", "timeout")):
+    if any(marker in name or marker in text for marker in ("provider", "rate", "connection", "timeout", "internal server", "internalservererror")):
         return _error(agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE, "模型服务暂时不可用。", retryable=True)
+    if any(marker in name or marker in text for marker in ("auth", "unauthorized", "permission", "forbidden")):
+        return _error(agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE, "API 凭据或权限无效，请检查 OPENAI_API_KEY。")
+    if any(marker in name or marker in text for marker in ("not found", "notfounderror", "bad request", "badrequesterror", "invalidparameter")):
+        return _error(agent_pb2.ERROR_CODE_INVALID_ARGUMENT, "模型不存在或请求参数无效，请检查 --default-model、--enable-reasoning 与 OPENAI_BASE_URL。")
     if isinstance(error, ValueError):
         return _error(agent_pb2.ERROR_CODE_INVALID_ARGUMENT, "请求配置无效。")
     return _error(agent_pb2.ERROR_CODE_INTERNAL, "服务内部错误。", retryable=True)

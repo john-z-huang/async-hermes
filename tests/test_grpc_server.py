@@ -14,6 +14,8 @@ from hermes.interfaces import grpc_server
 from hermes.interfaces.grpc_server import (
     HermesGrpcServer,
     PersistingRunner,
+    _error,
+    _safe_failure,
     parse_args,
     write_startup_handshake,
 )
@@ -391,3 +393,86 @@ def test_persistence_failure_keeps_turn_and_history_transactional(tmp_path) -> N
             await harness.close()
 
     asyncio.run(run())
+
+
+class SDKNotFoundError(Exception):
+    pass
+
+
+class SDKBadRequestError(Exception):
+    pass
+
+
+class SDKAuthenticationError(Exception):
+    pass
+
+
+class SDKPermissionDeniedError(Exception):
+    pass
+
+
+class SDKInternalServerError(Exception):
+    pass
+
+
+class SDKRateLimitError(Exception):
+    pass
+
+
+class SDKAPIConnectionError(Exception):
+    pass
+
+
+def test_safe_failure_maps_not_found_and_bad_request_to_invalid_argument() -> None:
+    not_found = _safe_failure(SDKNotFoundError("model not found"))
+    assert not_found.code == agent_pb2.ERROR_CODE_INVALID_ARGUMENT
+    assert "--default-model" in not_found.message
+
+    bad_request = _safe_failure(SDKBadRequestError("bad request error"))
+    assert bad_request.code == agent_pb2.ERROR_CODE_INVALID_ARGUMENT
+    assert "--default-model" in bad_request.message
+
+    invalid_param = _safe_failure("Responses stream ended with terminal event `response.failed`. "
+                                   "status=failed; error=ResponseError(code='InvalidParameter', "
+                                   "message='enable_thinking parameter is restricted to True.')")
+    assert invalid_param.code == agent_pb2.ERROR_CODE_INVALID_ARGUMENT
+    assert "enable-reasoning" in invalid_param.message
+
+
+def test_safe_failure_maps_auth_and_permission_to_provider_unavailable() -> None:
+    auth = _safe_failure(SDKAuthenticationError("invalid api key"))
+    assert auth.code == agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE
+    assert "凭据" in auth.message
+
+    permission = _safe_failure(SDKPermissionDeniedError("access denied"))
+    assert permission.code == agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE
+
+
+def test_safe_failure_maps_provider_errors_to_provider_unavailable() -> None:
+    for error in [
+        SDKInternalServerError("internal server error"),
+        SDKRateLimitError("rate limit exceeded"),
+        SDKAPIConnectionError("connection error"),
+        RuntimeError("provider timeout"),
+        RuntimeError("connection refused"),
+    ]:
+        result = _safe_failure(error)
+        assert result.code == agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE, (
+            f"{error.__class__.__name__} / {error} 应归类为 provider unavailable"
+        )
+
+
+def test_safe_failure_maps_value_error_to_invalid_argument() -> None:
+    result = _safe_failure(ValueError("workspace 不存在"))
+    assert result.code == agent_pb2.ERROR_CODE_INVALID_ARGUMENT
+    assert "配置" in result.message
+
+
+def test_safe_failure_maps_tool_errors_correctly() -> None:
+    result = _safe_failure(RuntimeError("tool execution failed"))
+    assert result.code == agent_pb2.ERROR_CODE_TOOL_FAILED
+
+
+def test_safe_failure_uses_internal_error_as_fallback() -> None:
+    result = _safe_failure(RuntimeError("unexpected crash"))
+    assert result.code == agent_pb2.ERROR_CODE_INTERNAL
