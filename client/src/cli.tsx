@@ -3,6 +3,7 @@ import { render } from "ink";
 
 import { optionsFromArgs } from "./cli-options.js";
 import { developmentPythonServerCommand, PythonServerLifecycle } from "./lifecycle/python-server.js";
+import { verifyHealthCheck } from "./rpc/health-check.js";
 import { GrpcHermesClient } from "./rpc/hermes-client.js";
 import { App } from "./tui/App.js";
 
@@ -10,7 +11,16 @@ const options = optionsFromArgs(process.argv.slice(2));
 
 async function main(): Promise<void> {
   if (!options.startPythonServer) {
-    render(<App client={new GrpcHermesClient(options.address)} showReasoning={options.showReasoning} />);
+    const client = new GrpcHermesClient(options.address);
+    try {
+      verifyHealthCheck(await client.healthCheck());
+    } catch (error) {
+      console.error(`无法启动 Hermes：${error instanceof Error ? error.message : String(error)}`);
+      client.close();
+      process.exitCode = 1;
+      return;
+    }
+    render(<App client={client} showReasoning={options.showReasoning} />);
     return;
   }
   const lifecycle = new PythonServerLifecycle({
