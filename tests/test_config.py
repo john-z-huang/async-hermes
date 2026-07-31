@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hermes.config import ConfigError, load_config
+from hermes.config import ConfigError, default_config_path, load_config
 from hermes.interfaces import cli
 
 
@@ -96,3 +96,19 @@ def test_rejects_json5_config_with_migration_guidance(tmp_path: Path) -> None:
 def test_rejects_missing_toml_config(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="已存在的普通文件"):
         load_config(tmp_path / "missing.toml")
+
+
+def test_loads_user_default_config_outside_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_directory = tmp_path / ".async-hermes"
+    config_directory.mkdir()
+    config = config_directory / "config.toml"
+    config.write_text('version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051', encoding="utf-8")
+    assert default_config_path(tmp_path) == config
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setattr(cli, "default_config_path", lambda: config)
+    args = cli.parse_args(["--workspace", str(workspace)])
+
+    assert args.config == config
+    assert args.workspace == workspace

@@ -19,6 +19,12 @@ class ConfigError(ValueError):
     """配置文件无法安全用于启动时抛出。"""
 
 
+def default_config_path(home_directory: Path | None = None) -> Path | None:
+    """返回存在的用户级默认配置，不从 workspace 搜索配置。"""
+    path = (home_directory or Path.home()) / ".async-hermes" / "config.toml"
+    return path if path.exists() else None
+
+
 @dataclass(frozen=True, slots=True)
 class RpcConfig:
     host: str

@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
@@ -26,6 +27,11 @@ export interface HermesConfig {
     content?: string;
   };
   tui: { showReasoning: boolean };
+}
+
+export function defaultConfigPath(homeDirectory = homedir()): string | undefined {
+  const path = join(homeDirectory, ".async-hermes", "config.toml");
+  return existsSync(path) ? path : undefined;
 }
 
 function object(value: unknown, field: string): Record<string, unknown> {

@@ -11,7 +11,7 @@ import sys
 from typing import TextIO
 
 from hermes.application import AgentService
-from hermes.config import ConfigError, HermesConfig, load_config
+from hermes.config import ConfigError, HermesConfig, default_config_path, load_config
 from hermes.domain import AgentEvent, AgentEventType
 from hermes.infrastructure.agents_sdk_runner import (
     AgentsSdkRunner,
@@ -123,16 +123,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     config_parser.add_argument("--config", type=Path)
     config_args, _ = config_parser.parse_known_args(argv)
     config: HermesConfig | None = None
-    if config_args.config is not None:
+    config_path = config_args.config or default_config_path()
+    if config_path is not None:
         try:
-            config = load_config(config_args.config)
+            config = load_config(config_path)
         except ConfigError as error:
             config_parser.error(str(error))
     agent_config = config.agent if config is not None else None
     parser = argparse.ArgumentParser(
         description="Run a simple Code Agent with the OpenAI Agents SDK."
     )
-    parser.add_argument("--config", type=Path, default=config_args.config)
+    parser.add_argument("--config", type=Path, default=config_path)
     parser.add_argument("--question", default=None)
     parser.add_argument(
         "--running-mode", choices=("loop", "one-shot"), default="loop"

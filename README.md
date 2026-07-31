@@ -35,6 +35,10 @@ uv run hermes-grpc-server --config ./hermes.config.toml
 npm run tui -- --config ./hermes.config.toml
 ```
 
+未传入 `--config` 时，三个入口会读取存在的 `~/.async-hermes/config.toml`；此用户级路径
+不受当前工作目录或 `--workspace` 限制。显式 `--config` 优先于该默认文件；默认文件不存在时
+保留内置安全默认值。
+
 配置文件必须包含 `version = 1` 与 `rpc.host`、`rpc.port`。支持的共享字段包括
 RPC loopback 地址、端口和启动超时，Agent 的 workspace、权限、推理和提示词，以及
 TUI 是否显示推理。`agent.workspace` 相对路径以配置文件所在目录为基准；Python 会在

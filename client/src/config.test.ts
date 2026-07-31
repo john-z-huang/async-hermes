@@ -1,11 +1,11 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { ConfigError, loadConfig } from "./config.js";
+import { ConfigError, defaultConfigPath, loadConfig } from "./config.js";
 import { optionsFromArgs } from "./cli-options.js";
 
 function configFile(body: string): string {
@@ -72,7 +72,18 @@ describe("共享 TOML 配置", () => {
     }
   });
 
+  it("从用户目录读取默认配置，并允许使用其他 workspace", () => {
+    const home = mkdtempSync(join(tmpdir(), "hermes-home-"));
+    const directory = join(home, ".async-hermes");
+    mkdirSync(directory);
+    const path = join(directory, "config.toml");
+    writeFileSync(path, 'version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051');
+
+    expect(defaultConfigPath(home)).toBe(path);
+    expect(optionsFromArgs([], path)).toMatchObject({ address: "127.0.0.1:50051", configPath: path });
+  });
+
   it("未指定地址时默认由 Node 托管 Python Server", () => {
-    expect(optionsFromArgs([]).startPythonServer).toBe(true);
+    expect(optionsFromArgs([], null).startPythonServer).toBe(true);
   });
 });
