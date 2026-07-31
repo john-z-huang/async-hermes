@@ -11,7 +11,7 @@ import {
   TurnStatus,
 } from "../generated/v1/agent.js";
 import { RpcProtocolError } from "./health-check.js";
-import { GrpcHermesClient, RpcServiceError } from "./hermes-client.js";
+import { GrpcHermesClient, RpcConnectionError, RpcServiceError } from "./hermes-client.js";
 
 function serviceError(code: status, details: string): ServiceError {
   return { code, details, message: details, name: "Error", metadata: undefined as never };
@@ -151,5 +151,13 @@ describe("GrpcHermesClient 契约", () => {
     await client.createSession("session-1");
 
     await expect(collect(client.runTurn("session-1", "malformed").events)).rejects.toBeInstanceOf(RpcProtocolError);
+  });
+});
+
+describe("GrpcHermesClient --address 模式 HealthCheck", () => {
+  it("指向不可达地址时 HealthCheck 返回连接错误", async () => {
+    const client = new GrpcHermesClient("127.0.0.1:59999");
+    await expect(client.healthCheck()).rejects.toBeInstanceOf(RpcConnectionError);
+    client.close();
   });
 });
