@@ -24,7 +24,6 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 - 使用 `uv` 管理依赖，运行环境保持 Python 3.13 及以上；未经明确需求，不修改依赖、Python 版本或运行时架构。
 - `.agents/` 仅存放运行时生成的 Agent 响应产物，不作为长期源码或文档修改目标，也不应提交为产品资产。
 - 修改应用逻辑、提示词、数据格式或工作流前，确认其与 [docs/GOAL.md](docs/GOAL.md) 的研究目标一致；若会改变材料边界、成本模型或结果质量要求，先说明影响并取得确认。
-- 先阅读与任务直接相关的源码、测试和文档；避免为了解上下文而批量载入大文件、运行产物或无关目录。
 
 ## 项目目录
 
@@ -35,118 +34,30 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 - `pyproject.toml` 与 `uv.lock`：项目元数据、依赖声明和锁定版本。
 - `README.md`：用户使用说明，包括 workspace 检查工具和运行模式。
 
-## 文档与提交语言
+## 通用开发工作流规范
 
-- 项目文档使用中文；如确有必要保留英文术语，应同时提供清晰的中文说明。
-- Git 提交信息使用中文，简明说明变更目的和范围。
+本项目的通用开发工作流规范由 Skill `dev-workflow-standards` 统一管理，本文件不重复这些通用内容。该 Skill 本地位于 `~/.agents/skills/dev-workflow-standards`，仓库为 `https://github.com/john-z-huang/dev-workflow-standards`。涉及以下事项时，遵循该 Skill 的约定：
 
-## Git 规范
+- Git 分支命名、提交规范与禁止 Code Agent 署名
+- 文档与提交语言（使用中文）
+- GitHub 操作规范、网络与认证、`GH_TOKEN` 安全处理
+- Issue 与 PR 流程、PR 合并后清理
+- 项目管理与快速检查清单
 
-### 分支命名
+项目级入口与看板：
 
-- Git 分支名称必须只使用 ASCII 字符，不得包含中文或其他非 ASCII 字符，以避免终端、脚本、CI、URL 编码及跨平台协作中的兼容性问题。
-- 分支名称中的单词使用小写英文字母、数字和连字符（`-`）表示；需要表达层级时，仅可使用斜杠（`/`）分隔层级。
-- 分支名称应以清晰的类别前缀开始，例如 `agent/`、`feat/`、`fix/`、`docs/` 或 `refactor/`，并使用简短的英文描述说明变更内容。
+- 目标与工作流权威说明：[docs/GOAL.md](docs/GOAL.md)
+- 规划看板：[Hermes 架构演进 Roadmap](https://github.com/users/john-z-huang/projects/7/views/1)
 
-**合规示例**：`agent/docs-branch-naming`、`fix/batch-result-validation`、`feat/async-batch-submit`。
+当需要优化通用开发工作流时，修改 `dev-workflow-standards` Skill 并推送到其 GitHub 仓库，不在本文件中追加通用开发流程内容。
 
-**不合规示例**（含中文或非 ASCII 字符）：`agent/更新-git-规则`、`修复/批处理校验`；**不合规示例**（前缀不明确）：`feature/分支命名`、`update-docs`。
+### Skill 版本同步
 
-### 提交规范
+`docs/dev-workflow-standards.commit` 记录本文件对 Skill 的描述所依据的 Skill commit。读取或更新本文件对 Skill 的描述前，先运行校验：
 
-- 以可独立验证的功能模块为提交边界；每完成一个功能模块，都必须同时补充或更新相应测试代码。
-- 只有在该模块相关测试通过后，才可提交该模块的 Git 改动；提交前应记录实际执行的验证命令及结果。
-- 不得将多个互不独立的功能模块、重构或文档变更混入同一个提交。应按可审查、可回滚的最小逻辑单元拆分提交。
+```bash
+bash scripts/check-dev-workflow-skill.sh
+```
 
-  **正确做法**：一个提交只包含一个功能的实现及其测试 → `feat: 添加批量请求校验`。
-
-  **错误做法**：一个提交同时包含新功能实现、文档更新和不相关的重构 → `feat: 批量处理、文档优化与代码清理`。
-
-- 一个 Issue 涉及多个改动点时，须先规划每个改动点的职责与文件边界。每个改动点完成实现及对应测试后，先运行该改动点的针对性测试和必要的回归测试；仅在测试通过后，才提交该改动点。不得将复杂需求的全部实现堆入一次提交。
-- 提交信息保持中文、简明，并准确描述该提交所包含的模块变更。
-
-#### 提交内容署名约束
-
-Code Agent 是辅助开发工具，不是真实的开发人员。Code Agent 不能对最终代码改动承担责任，只有对代码改动负责的工程师才拥有署名权。因此：
-
-- Git 提交信息中不得包含 `Generated with`、`Co-Authored-By` 等任何 Code Agent 使用声明。
-- 不得在任何位置（提交信息、Pull Request 描述、文档、代码注释等）声明本次改动所使用的特定 Code Agent 产品。
-- 代码改动的署名权完全归属于工程师；Code Agent 不拥有署名权，也不承担代码改动引发的责任。
-- 提交信息仅反映工程师的变更意图与内容，保持简洁、中文、可追溯。
-
-## 需求与变更流程
-
-### GitHub 操作规范
-
-- 涉及 GitHub（包括 Issue、Pull Request、Projects、Actions、仓库信息或评论）前，必须先查阅 Codex 的 GitHub Skill，并遵循其中与当前任务相关的建议。
-- 所有 GitHub 操作只能通过 GitHub CLI（`gh`）执行；绝对禁止通过浏览器或浏览器自动化工具操作 GitHub。
-
-  **正确做法**：`gh issue create --title "..." --body "..."`、`gh pr create --title "..." --body "..."`。
-
-  **错误做法**：在浏览器中打开 `github.com` 手动创建 Issue/PR、使用 Playwright/Selenium 等浏览器自动化工具操作 GitHub 页面。
-
-- 执行 `gh` 命令时，必须使用能够进行受限网络访问的沙箱环境，不得在完全禁止网络访问的沙箱中运行 `gh`。`gh` 需要与 GitHub API 通信，完全断网的沙箱会导致命令不可用，应使用允许出站 HTTPS 请求但施加其他合理限制的沙箱配置。
-
-### 网络与认证
-
-- 在受限或配置代理的网络环境中使用 `gh` 前，先确认请求将通过可访问的 HTTP Proxy；不得因代理或 GitHub API 不可达而直接判定 `GH_TOKEN` 或本地登录凭据失效。
-
-  **认证排查顺序**：
-  1. 先检查代理与 GitHub API 连通性（如 `gh api /zen 2>&1` 或 `curl -I https://api.github.com`）。
-  2. 确认网络连通后，再检查 `GH_TOKEN` 是否已设置和凭据是否有效。
-
-- 确认网络连通后，若仍需重新认证：先确认环境变量 `GH_TOKEN` 已设置，再仅通过标准输入将其传递给 `gh auth login --with-token` 完成认证；`GH_TOKEN` 未设置时应报告认证阻塞，不得猜测、伪造或要求用户在对话中粘贴令牌。
-- `GH_TOKEN` 是敏感信息：严禁打印、回显、插值展示、记录或写入其值。
-
-  **禁止的行为（非穷举）**：
-  - 终端与工具输出（如 `echo $GH_TOKEN`、`printenv GH_TOKEN`）
-  - 日志文件、源代码、配置文件
-  - 提交信息、Issue、Pull Request、评论和错误报告
-  - 调试输出（如 `set -x` 后执行含令牌的命令）
-
-### Issue 与 PR 流程
-
-- 新增功能或修复新发现的问题前，必须先在本项目的 GitHub Issues 中创建对应的开放 Issue。
-- Issue 必须清晰、详细地说明以下内容：
-  - 功能需求或缺陷表现
-  - 影响范围
-  - 预期行为与验收标准
-  - 必要时补充：复现步骤、技术约束、前置依赖
-- 实现改动必须通过 Pull Request 合并，并在 PR 描述中通过 `Closes #<Issue 编号>`（或等效关键字）关联对应的开放 Issue。
-- 未关联任何开放 Issue 时，禁止将本地改动推送到 GitHub。
-
-## 项目管理
-
-将 GitHub Projects 看板作为规划和跟踪工作的唯一事实来源：
-
-- 看板：[Hermes 架构演进 Roadmap](https://github.com/users/john-z-huang/projects/7/views/1)。
-- 开始工作前，查看对应看板条目、Issue、前置依赖、状态和"阶段"字段。
-- GitHub Issue 的关闭状态与 Projects 条目的 `Status` 字段是不同概念：实际开始时可将条目更新为"进行中"，但在关联 Pull Request 合并前，严禁主动关闭 Issue 或将条目 `Status` 提前更新为"完成"。
-- Pull Request 必须通过 `Closes #<Issue 编号>`（或等效关键字）关联开放 Issue；合并后由 GitHub 自动关闭 Issue。此后 Agent 仅核验 Issue 已关闭，再将对应 Projects 条目同步为"完成"，避免因提前关闭 Issue 违反开放 Issue 关联校验。
-- 除非工作范围发生变化，否则保留已有"阶段"；缺失阶段且无法从工作性质合理判断时，请求产品或排期指示。
-- 不得虚构日期、进度或状态。需要产品或排期决策时，请向用户请求指示。
-
-## 附录：快速检查清单
-
-### 开始新功能前
-
-- [ ] 已在 GitHub 创建对应的开放 Issue（含清晰的标题、描述和验收标准）
-- [ ] 已查阅 [Hermes 架构演进 Roadmap](https://github.com/users/john-z-huang/projects/7/views/1)，确认条目状态和阶段
-- [ ] 已阅读与该功能相关的源码、测试和文档（不批量载入无关内容）
-- [ ] 变更方向与 [docs/GOAL.md](docs/GOAL.md) 的研究目标一致
-
-### 提交前
-
-- [ ] 该提交仅包含一个可独立验证的功能模块（不混入无关变更）
-- [ ] 对应的测试代码已补充或更新，且测试通过
-- [ ] 已记录实际执行的验证命令及结果
-- [ ] 提交信息使用中文，简明描述模块变更
-- [ ] 提交信息及任何产物中不含 `Generated with`、`Co-Authored-By` 等 Code Agent 使用声明
-
-### 发起 PR 前
-
-- [ ] 分支名称符合规范（ASCII、小写、类别前缀）
-- [ ] PR 描述中包含 `Closes #<Issue 编号>`（或等效关键字）
-- [ ] 已确认关联的 Issue 处于开放状态
-- [ ] 所有 GitHub 操作均通过 `gh` CLI 执行（非浏览器或浏览器自动化）
-- [ ] `gh` 命令在受限网络沙箱（允许出站 HTTPS）中运行
+- 输出「已同步」→ 本文件的描述与 Skill 最新 commit 一致，无需处理。
+- 输出「落后」→ 本文件对 Skill 的描述可能过期：请阅读 Skill 的 `SKILL.md`，把其中新增的相关约定补充到上文对应列表，并将 `docs/dev-workflow-standards.commit` 更新为 Skill 最新 commit（本地 `git rev-parse HEAD` 或远端 `git ls-remote` 得到的 commit）。
