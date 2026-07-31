@@ -40,8 +40,8 @@ npm run tui -- --config ./hermes.config.toml
 配置，未声明的字段继续继承全局文件；默认文件不存在时保留内置安全默认值。
 
 配置文件必须包含 `version = 1` 与 `rpc.host`、`rpc.port`。支持的共享字段包括
-RPC loopback 地址、端口和启动超时，Agent 的 workspace、权限、推理和提示词，以及
-TUI 是否显示推理。`agent.workspace` 相对路径以配置文件所在目录为基准；Python 会在
+RPC loopback 地址、端口和启动超时，Agent 的 workspace、权限、推理、模型选择和提示词，
+以及 TUI 是否显示推理。`agent.workspace` 相对路径以配置文件所在目录为基准；Python 会在
 启动前确认它存在，且 workspace/权限安全边界始终由 Python 执行。
 
 优先级为：显式命令行参数 > 已说明的环境变量 > TOML 文件 > 现有安全内置默认值。
@@ -51,7 +51,10 @@ TUI 是否显示推理。`agent.workspace` 相对路径以配置文件所在目�
 给出迁移提示；请按示例改写为 TOML 并使用 `.toml` 路径。
 
 严禁将 `OPENAI_API_KEY`、令牌、密码、完整环境变量或 SDK 历史写入此文件。它已被
-`.gitignore` 忽略；只提交示例文件和说明。
+`.gitignore` 忽略；只提交示例文件和说明。Node 管理 Python Server 时只从父进程环境
+显式透传 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_DEFAULT_MODEL` 及运行时所需的
+基础变量，不继承其他未列入白名单的环境变量；因此 Python CLI 与 Node TUI 可以使用
+同一个 OpenAI 兼容 API 端点和模型配置。
 
 原有入口继续兼容：
 
@@ -109,6 +112,31 @@ loopback 临时端口，读取 stdout 中唯一的 JSON 启动握手，再通过
 npm run tui -- --config ./hermes.config.toml
 ```
 
+Node 入口支持与 Python CLI 对齐的交互和 Agent 覆盖参数。例如：
+
+```bash
+npm run tui -- \
+  --config ./hermes.config.toml \
+  --running-mode one-shot \
+  --question "总结当前项目" \
+  --system-prompt "你是代码分析助手" \
+  --default-model gpt-5 \
+  --enable-reasoning true \
+  --reason-effect high \
+  --workspace . \
+  --output-file results/answer.txt \
+  --permissions read-only
+```
+
+支持的交互参数为 `--question`、`--running-mode loop|one-shot` 和
+`--enable-stream-output [true|false]`。支持的 Agent 参数为 `--system-prompt`、
+`--user-prompt`、`--content`、`--default-model`、`--enable-reasoning`、
+`--reason-effect`、`--workspace`、`--output-file` 与 `--permissions`。
+命令行 Agent 参数覆盖 TOML，并以参数数组传给 Python；
+workspace、权限和输出路径仍由 Python 校验。`one-shot` 要求同时提供非空 `--question`，
+本轮结束后自动退出；关闭流式展示时只显示终态结果。Node 管理模式会像 Python CLI 一样保存
+每轮最终响应：未指定 `--output-file` 时写入 workspace 的 `.agents/`，指定后覆盖该相对路径。
+
 开发模式使用 `uv run hermes-grpc-server`。打包模式必须由安装器或启动器设置
 `HERMES_PYTHON_EXECUTABLE` 为随应用分发的 Python 可执行文件；Node 会以
 `<python> -m hermes.interfaces.grpc_server` 调用它，不会搜索用户机器上的任意 Python。
@@ -121,6 +149,10 @@ npm run tui -- --config ./hermes.config.toml
 uv run hermes-grpc-server --config ./hermes.config.toml
 npm run tui -- --address 127.0.0.1:50051
 ```
+
+外部 Server 模式只允许本地交互参数。Node 无法改变已经运行的 Server，因此使用
+`--workspace`、提示词、推理、权限或输出文件等 Agent 覆盖参数会在启动前失败；本地 TOML
+包含 `[agent]` 时也会明确提示这些字段不会应用，应改在外部 Server 的启动命令或配置中设置。
 
 也可在构建后直接运行二进制文件：
 

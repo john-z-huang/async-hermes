@@ -11,6 +11,7 @@ workspace = "."
 permissions = "read-only"
 enableReasoning = false
 reasonEffect = "medium"
+# defaultModel = "gpt-5"
 
 [tui]
 showReasoning = false

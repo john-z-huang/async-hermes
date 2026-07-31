@@ -41,6 +41,7 @@ class AgentConfig:
     system_prompt: str | None = None
     user_prompt: str | None = None
     content: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +139,7 @@ def load_config(value: str | Path, *, defaults: str | Path | None = None) -> Her
         raise ConfigError("rpc.startupTimeoutMs 必须是正整数。")
 
     agent_values = _mapping(root.get("agent", {}), "agent")
-    _unknown(agent_values, {"workspace", "permissions", "enableReasoning", "reasonEffect", "systemPrompt", "userPrompt", "content"}, "agent")
+    _unknown(agent_values, {"workspace", "permissions", "enableReasoning", "reasonEffect", "systemPrompt", "userPrompt", "content", "defaultModel"}, "agent")
     workspace_value = _string(agent_values, "agent.workspace")
     workspace = None
     if workspace_value is not None:
@@ -166,6 +167,7 @@ def load_config(value: str | Path, *, defaults: str | Path | None = None) -> Her
             system_prompt=_string(agent_values, "agent.systemPrompt"),
             user_prompt=_string(agent_values, "agent.userPrompt"),
             content=_string(agent_values, "agent.content"),
+            model=_string(agent_values, "agent.defaultModel"),
         ),
         tui=TuiConfig(show_reasoning=show_reasoning if show_reasoning is not None else False),
     )

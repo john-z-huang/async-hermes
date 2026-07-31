@@ -22,6 +22,7 @@ workspace = "."
 permissions = "read-only"
 enableReasoning = false
 reasonEffect = "medium"
+# defaultModel = "gpt-5"
 
 [tui]
 showReasoning = false
@@ -40,6 +41,7 @@ export interface HermesConfig {
   agent: {
     workspace?: string;
     permissions?: string;
+    defaultModel?: string;
     enableReasoning?: boolean;
     reasonEffect?: string;
     systemPrompt?: string;
@@ -137,7 +139,7 @@ export function loadConfig(configPath: string, defaultPath?: string): HermesConf
   const agent = object(root.agent ?? {}, "agent");
   unknown(
     agent,
-    ["workspace", "permissions", "enableReasoning", "reasonEffect", "systemPrompt", "userPrompt", "content"],
+    ["workspace", "permissions", "defaultModel", "enableReasoning", "reasonEffect", "systemPrompt", "userPrompt", "content"],
     "agent",
   );
   const permissions = text(agent, "permissions");
@@ -154,6 +156,7 @@ export function loadConfig(configPath: string, defaultPath?: string): HermesConf
     agent: {
       workspace: text(agent, "workspace"),
       permissions,
+      defaultModel: text(agent, "defaultModel"),
       enableReasoning: boolean(agent, "enableReasoning"),
       reasonEffect,
       systemPrompt: text(agent, "systemPrompt"),

@@ -32,15 +32,18 @@ main.py
 
 `hermes/config.py` 与 `client/src/config.ts` 分别在 Python 与 Node 运行时加载同一份
 显式指定的 TOML 文件。该文件只描述非敏感运行参数，当前版本为 `1`；两个实现均拒绝
-未知字段、未知版本、非法类型和非 loopback RPC host。Node 只将配置用于连接与展示，绝不
-将其作为 workspace 或权限授权；Python 仍通过 `resolve_workspace` 与权限配置执行权威校验。
+未知字段、未知版本、非法类型和非 loopback RPC host。Node 可解析与 Python CLI 对齐的
+Agent 命令行覆盖，但只把它们作为参数数组传给受管理的 Python Server，绝不自行授予
+workspace 或权限；Python 仍通过 `resolve_workspace`、权限配置和输出路径解析执行权威校验。
 
 配置不会从当前目录或 workspace 自动探测。未传入 `--config` 时，CLI、gRPC Server 与 SEA
 TUI 会读取存在的 `~/.async-hermes/config.toml`；该用户级文件不受当前工作目录和
 `--workspace` 限制。调用时指定的 `--config` 会在读取默认文件后逐项覆盖同名字段，未声明
 的字段继续继承默认文件；默认文件不存在时，各入口保留既有默认值。显式 CLI 参数优先；TUI 的
-`HERMES_GRPC_ADDRESS` 在配置后覆盖、在 `--address` 前被覆盖。配置文件不得包含 API key、令牌、密码或 SDK 历史。旧
-`.json5` 文件不再读取；启动诊断会提示用户迁移至 `hermes.config.example.toml`。
+`HERMES_GRPC_ADDRESS` 在配置后覆盖、在 `--address` 前被覆盖。连接外部 Server 时，本地
+交互参数仍有效，但 Node 拒绝无法应用的 Agent 命令行覆盖，并提示本地 `[agent]` 配置由外部
+服务决定。配置文件不得包含 API key、令牌、密码或 SDK 历史。旧 `.json5` 文件不再读取；
+启动诊断会提示用户迁移至 `hermes.config.example.toml`。
 
 ## 代码目录
 
@@ -163,7 +166,8 @@ Node CLI 是本地交互模式的父进程。默认状态机如下：
 
 ```text
 启动 Node
-  → 以参数数组启动 Python（127.0.0.1、端口 0、--startup-handshake）
+  → 解析 TUI 本地参数与 Agent 覆盖
+  → 以参数数组启动 Python（127.0.0.1、端口 0、--startup-handshake、Agent 覆盖）
   → 等待 stdout 的单行 JSON 握手
   → HealthCheck + 协议版本校验
   → 渲染 TUI
@@ -178,7 +182,14 @@ Node 拒绝非 loopback 地址、无效握手、启动期退出、超时、未�
 
 开发模式通过 `uv run hermes-grpc-server` 启动。打包模式不自动搜索运行时，必须由安装器提供
 `HERMES_PYTHON_EXECUTABLE`；该可执行文件以 `-m hermes.interfaces.grpc_server` 启动。显式
-`--address` 或 `HERMES_GRPC_ADDRESS` 仍可连接调试用的既有本地 Server，此模式不接管其生命周期。
+`--address` 或 `HERMES_GRPC_ADDRESS` 仍可连接调试用的既有本地 Server，此模式不接管其生命周期，
+也不能应用本地 Agent 覆盖。受管理的 Python 子进程只继承明确允许的环境变量；LLM 运行所需的
+`OPENAI_API_KEY` 与 `OPENAI_BASE_URL` 会显式透传，其他未列入白名单的父进程变量不会继承。
+
+Node 管理模式启用 Python 侧响应持久化；默认写入 workspace 的 `.agents/`，显式
+`--output-file` 必须是 workspace 内相对路径。`--running-mode one-shot` 与
+`--enable-stream-output` 属于 TUI 本地行为，分别控制终态自动退出和增量事件展示，不进入 RPC
+协议或 Agent Core。
 
 它通过 `HermesGrpcServer` 管理生命周期，并可用 `hermes-grpc-server` 独立启动。`HealthCheck` 在接收新 Turn 时返回 `SERVING`；开始关闭后内部状态转为 `NOT_SERVING`。
 

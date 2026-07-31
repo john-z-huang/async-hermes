@@ -90,6 +90,7 @@ class AgentsSdkRunnerConfig:
     system_prompt: str = SYSTEM_PROMPT
     user_prompt: str = USER_PROMPT
     content: str = ""
+    model: str | None = None
     enable_reasoning: bool = False
     reason_effect: str = DEFAULT_REASON_EFFECT
     workspace: str | Path | None = None
@@ -139,6 +140,7 @@ class AgentsSdkRunner:
         agent = Agent(
             name="Code Agent",
             instructions=self.config.system_prompt,
+            model=self.config.model,
             model_settings=ModelSettings(reasoning=self._reasoning()),
             tools=[
                 build_read_only_workspace_tool(

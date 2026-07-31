@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 import json
 import logging
+from pathlib import Path
 import signal
 import sys
 from typing import Final, TextIO
@@ -15,15 +16,27 @@ from uuid import uuid4
 
 import grpc
 
-from hermes.application import AgentService
+from hermes.application import (
+    AgentRunner,
+    AgentService,
+    RunnerEvent,
+    RunnerEventType,
+    TurnRequest,
+)
 from hermes.config import ConfigError, HermesConfig, default_config_path, load_config
 from hermes.domain import AgentEvent, AgentEventType, TurnStatus
 from hermes.infrastructure.agents_sdk_runner import (
     AgentsSdkRunner,
     AgentsSdkRunnerConfig,
     DEFAULT_REASON_EFFECT,
+    REASON_EFFECTS,
     SYSTEM_PROMPT,
     USER_PROMPT,
+)
+from hermes.infrastructure.persistence import persist_agent_output
+from hermes.infrastructure.workspace_tools import (
+    PERMISSION_PROFILES,
+    resolve_workspace,
 )
 
 from .generated.v1 import agent_pb2
@@ -47,6 +60,34 @@ class ActiveTurn:
     turn_id: str | None = None
 
 
+class PersistingRunner:
+    """在完成事件提交历史前持久化最终响应。"""
+
+    def __init__(
+        self,
+        runner: AgentRunner,
+        *,
+        workspace: str | Path | None = None,
+        output_file: str | Path | None = None,
+    ) -> None:
+        self._runner = runner
+        self._workspace = workspace
+        self._output_file = output_file
+
+    def run(self, request: TurnRequest) -> AsyncIterator[RunnerEvent]:
+        return self._run(request)
+
+    async def _run(self, request: TurnRequest) -> AsyncIterator[RunnerEvent]:
+        async for event in self._runner.run(request):
+            if event.type == RunnerEventType.COMPLETED:
+                persist_agent_output(
+                    event.text,
+                    workspace=self._workspace,
+                    output_file=self._output_file,
+                )
+            yield event
+
+
 def _error(code: int, message: str, *, retryable: bool = False) -> agent_pb2.RpcError:
     return agent_pb2.RpcError(code=code, message=message, retryable=retryable)
 
@@ -61,13 +102,21 @@ def _turn_status(status: TurnStatus) -> int:
 
 
 def _safe_failure(error: Exception | str) -> agent_pb2.RpcError:
-    """把内部异常归类为稳定、不泄露底层内容的 RPC 错误。"""
+    """把内部异常归类为稳定、不泄露底层内容的 RPC 错误。
+
+    按优先级从高到低匹配异常特征，安全地映射到面向用户的诊断信息，
+    不在 RPC 消息中暴露 SDK 原始错误详情。
+    """
     name = error.__class__.__name__.casefold() if isinstance(error, Exception) else ""
     text = str(error).casefold()
     if "tool" in name or "tool" in text:
         return _error(agent_pb2.ERROR_CODE_TOOL_FAILED, "工具执行失败。")
-    if any(marker in name or marker in text for marker in ("provider", "rate", "connection", "timeout")):
+    if any(marker in name or marker in text for marker in ("provider", "rate", "connection", "timeout", "internal server", "internalservererror")):
         return _error(agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE, "模型服务暂时不可用。", retryable=True)
+    if any(marker in name or marker in text for marker in ("auth", "unauthorized", "permission", "forbidden")):
+        return _error(agent_pb2.ERROR_CODE_PROVIDER_UNAVAILABLE, "API 凭据或权限无效，请检查 OPENAI_API_KEY。")
+    if any(marker in name or marker in text for marker in ("not found", "notfounderror", "bad request", "badrequesterror", "invalidparameter")):
+        return _error(agent_pb2.ERROR_CODE_INVALID_ARGUMENT, "模型不存在或请求参数无效，请检查 --default-model、--enable-reasoning 与 OPENAI_BASE_URL。")
     if isinstance(error, ValueError):
         return _error(agent_pb2.ERROR_CODE_INVALID_ARGUMENT, "请求配置无效。")
     return _error(agent_pb2.ERROR_CODE_INTERNAL, "服务内部错误。", retryable=True)
@@ -280,23 +329,23 @@ class HermesGrpcServer:
 async def _serve(
     host: str,
     port: int,
-    config: HermesConfig | None = None,
+    runner_config: AgentsSdkRunnerConfig | None = None,
     *,
+    output_file: str | None = None,
+    persist_outputs: bool = False,
     startup_handshake: bool = False,
 ) -> None:
-    agent = config.agent if config is not None else None
-    runner = AgentsSdkRunner(
-        AgentsSdkRunnerConfig(
-            workspace=agent.workspace if agent and agent.workspace is not None else None,
-            permissions=agent.permissions if agent and agent.permissions is not None else "read-only",
-            enable_reasoning=agent.enable_reasoning if agent and agent.enable_reasoning is not None else False,
-            reason_effect=agent.reason_effect if agent and agent.reason_effect is not None else DEFAULT_REASON_EFFECT,
-            system_prompt=agent.system_prompt if agent and agent.system_prompt is not None else SYSTEM_PROMPT,
-            user_prompt=agent.user_prompt if agent and agent.user_prompt is not None else USER_PROMPT,
-            content=agent.content if agent and agent.content is not None else "",
+    runner = AgentsSdkRunner(runner_config)
+    effective_runner: AgentRunner = (
+        PersistingRunner(
+            runner,
+            workspace=runner.workspace,
+            output_file=output_file,
         )
+        if persist_outputs
+        else runner
     )
-    server = HermesGrpcServer(AgentService(runner), host=host, port=port)
+    server = HermesGrpcServer(AgentService(effective_runner), host=host, port=port)
     await server.start()
     if startup_handshake:
         write_startup_handshake(sys.stdout, server.address)
@@ -325,8 +374,24 @@ async def _serve(
         await server.stop()
 
 
-def main(argv: list[str] | None = None) -> None:
-    """可独立启动的本地 gRPC server 入口。"""
+def _parse_boolean(value: str) -> bool:
+    normalized = value.casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("必须使用 true 或 false。")
+
+
+def _workspace_argument(value: str) -> Path:
+    try:
+        return resolve_workspace(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """解析 gRPC Server 与受控 Agent 运行参数。"""
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument("--config")
     config_args, _ = config_parser.parse_known_args(argv)
@@ -340,15 +405,98 @@ def main(argv: list[str] | None = None) -> None:
             )
         except ConfigError as error:
             config_parser.error(str(error))
+    agent = config.agent if config is not None else None
     parser = argparse.ArgumentParser(description="启动 Hermes 本地 gRPC Server")
     parser.add_argument("--config", default=config_path)
     parser.add_argument("--host", default=config.rpc.host if config is not None else "127.0.0.1")
     parser.add_argument("--port", type=int, default=config.rpc.port if config is not None else 0)
     parser.add_argument("--startup-handshake", action="store_true", help="向 stdout 输出机器可读启动信息")
+    parser.add_argument(
+        "--system-prompt",
+        default=agent.system_prompt
+        if agent and agent.system_prompt is not None
+        else SYSTEM_PROMPT,
+    )
+    parser.add_argument(
+        "--user-prompt",
+        default=agent.user_prompt
+        if agent and agent.user_prompt is not None
+        else USER_PROMPT,
+    )
+    parser.add_argument(
+        "--content",
+        default=agent.content if agent and agent.content is not None else "",
+    )
+    parser.add_argument(
+        "--default-model",
+        default=agent.model if agent and agent.model is not None else None,
+    )
+    parser.add_argument(
+        "--enable-reasoning",
+        nargs="?",
+        const=True,
+        type=_parse_boolean,
+        default=agent.enable_reasoning
+        if agent and agent.enable_reasoning is not None
+        else False,
+    )
+    parser.add_argument(
+        "--reason-effect",
+        default=agent.reason_effect
+        if agent and agent.reason_effect is not None
+        else DEFAULT_REASON_EFFECT,
+    )
+    parser.add_argument(
+        "--workspace",
+        type=_workspace_argument,
+        default=agent.workspace
+        if agent and agent.workspace is not None
+        else None,
+    )
+    parser.add_argument(
+        "--permissions",
+        choices=tuple(PERMISSION_PROFILES),
+        default=agent.permissions
+        if agent and agent.permissions is not None
+        else "read-only",
+    )
+    parser.add_argument("--output-file")
+    parser.add_argument(
+        "--persist-output",
+        action="store_true",
+        help="将每轮最终响应保存到 workspace；Node TUI 管理模式默认启用",
+    )
     args = parser.parse_args(argv)
+    if args.enable_reasoning and args.reason_effect not in REASON_EFFECTS:
+        parser.error(f"--reason-effect 必须是以下值之一：{', '.join(REASON_EFFECTS)}")
+    return args
+
+
+def main(argv: list[str] | None = None) -> None:
+    """可独立启动的本地 gRPC server 入口。"""
+    args = parse_args(argv)
+    runner_config = AgentsSdkRunnerConfig(
+        workspace=args.workspace,
+        permissions=args.permissions,
+        enable_reasoning=args.enable_reasoning,
+        reason_effect=args.reason_effect,
+        system_prompt=args.system_prompt,
+        user_prompt=args.user_prompt,
+        content=args.content,
+        model=args.default_model,
+    )
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        asyncio.run(_serve(args.host, args.port, config, startup_handshake=args.startup_handshake))
+        asyncio.run(
+            _serve(
+                args.host,
+                args.port,
+                runner_config,
+                output_file=args.output_file,
+                persist_outputs=args.persist_output,
+                startup_handshake=args.startup_handshake,
+            )
+        )
     except KeyboardInterrupt:
         return
 

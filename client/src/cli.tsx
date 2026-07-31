@@ -7,9 +7,22 @@ import { verifyHealthCheck } from "./rpc/health-check.js";
 import { GrpcHermesClient } from "./rpc/hermes-client.js";
 import { App } from "./tui/App.js";
 
-const options = optionsFromArgs(process.argv.slice(2));
-
 async function main(): Promise<void> {
+  let options: ReturnType<typeof optionsFromArgs>;
+  try {
+    options = optionsFromArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(`无法启动 Hermes：${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 2;
+    return;
+  }
+  if (options.externalServerNotice) console.error(options.externalServerNotice);
+  const appProps = {
+    enableStreamOutput: options.enableStreamOutput,
+    initialQuestion: options.initialQuestion,
+    runningMode: options.runningMode,
+    showReasoning: options.showReasoning,
+  };
   if (!options.startPythonServer) {
     const client = new GrpcHermesClient(options.address);
     try {
@@ -20,11 +33,12 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    render(<App client={client} showReasoning={options.showReasoning} />);
+    const app = render(<App client={client} {...appProps} />);
+    await app.waitUntilExit();
     return;
   }
   const lifecycle = new PythonServerLifecycle({
-    command: developmentPythonServerCommand(options.configPath),
+    command: developmentPythonServerCommand(options.configPath, undefined, options.pythonServerArgs),
     onUnexpectedExit: (message) => console.error(message),
   });
   let signalCount = 0;
@@ -55,7 +69,7 @@ async function main(): Promise<void> {
   try {
     const client = await lifecycle.start();
     if (shutdownRequested) return;
-    app = render(<App client={client} showReasoning={options.showReasoning} />);
+    app = render(<App client={client} {...appProps} />);
     await app.waitUntilExit();
   } catch (error) {
     console.error(`无法启动 Hermes：${error instanceof Error ? error.message : String(error)}`);

@@ -18,9 +18,11 @@ export interface PythonServerCommand {
 export function developmentPythonServerCommand(
   configPath?: string,
   pythonExecutable = process.env.HERMES_PYTHON_EXECUTABLE,
+  agentArgs: readonly string[] = [],
 ): PythonServerCommand {
-  const serverArgs = ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"];
+  const serverArgs = ["--host", "127.0.0.1", "--port", "0", "--startup-handshake", "--persist-output"];
   if (configPath) serverArgs.push("--config", configPath);
+  serverArgs.push(...agentArgs);
   if (pythonExecutable)
     return { executable: pythonExecutable, args: ["-m", "hermes.interfaces.grpc_server", ...serverArgs] };
   const args = ["run", "hermes-grpc-server", ...serverArgs];
@@ -43,7 +45,7 @@ export interface PythonServerLifecycleOptions {
 }
 
 function allowedEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const allowed = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "OPENAI_API_KEY"];
+  const allowed = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_DEFAULT_MODEL"];
   // 透传 UV_* 环境变量，确保 uv 管理的 Python 环境（VIRTUAL_ENV 等）正常工作。
   for (const key of Object.keys(source)) {
     if (key.startsWith("UV_")) allowed.push(key);
