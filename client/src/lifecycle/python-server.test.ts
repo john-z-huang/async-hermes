@@ -109,6 +109,47 @@ describe("PythonServerLifecycle", () => {
     expect(message).toContain("意外退出");
   });
 
+  it("仅向 Python 子进程传递允许的 LLM 运行环境", async () => {
+    const child = new FakeChild();
+    let childEnvironment: NodeJS.ProcessEnv = {};
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalBaseUrl = process.env.OPENAI_BASE_URL;
+    const originalDefaultModel = process.env.OPENAI_DEFAULT_MODEL;
+    const originalUnlisted = process.env.HERMES_UNLISTED_SECRET;
+    process.env.OPENAI_API_KEY = "test-api-key";
+    process.env.OPENAI_BASE_URL = "https://llm.example.test/v1";
+    process.env.OPENAI_DEFAULT_MODEL = "gpt-5";
+    process.env.HERMES_UNLISTED_SECRET = "must-not-be-forwarded";
+    try {
+      const lifecycle = new PythonServerLifecycle({
+        command: { executable: "uv", args: [] },
+        spawn: (_command, _args, options) => {
+          childEnvironment = options.env;
+          return child as never;
+        },
+        createClient: () => client(serving),
+      });
+      const starting = lifecycle.start();
+      child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+      await starting;
+
+      expect(childEnvironment.OPENAI_API_KEY).toBe("test-api-key");
+      expect(childEnvironment.OPENAI_BASE_URL).toBe("https://llm.example.test/v1");
+      expect(childEnvironment.OPENAI_DEFAULT_MODEL).toBe("gpt-5");
+      expect(childEnvironment.HERMES_UNLISTED_SECRET).toBeUndefined();
+      await lifecycle.stop();
+    } finally {
+      if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalApiKey;
+      if (originalBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBaseUrl;
+      if (originalDefaultModel === undefined) delete process.env.OPENAI_DEFAULT_MODEL;
+      else process.env.OPENAI_DEFAULT_MODEL = originalDefaultModel;
+      if (originalUnlisted === undefined) delete process.env.HERMES_UNLISTED_SECRET;
+      else process.env.HERMES_UNLISTED_SECRET = originalUnlisted;
+    }
+  });
+
   it("开发模式使用临时端口和受控握手", () => {
     expect(developmentPythonServerCommand("config.toml", undefined)).toEqual({
       executable: "uv",
