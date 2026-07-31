@@ -110,7 +110,7 @@ describe("PythonServerLifecycle", () => {
   });
 
   it("开发模式使用临时端口和受控握手", () => {
-    expect(developmentPythonServerCommand("config.json5", undefined)).toEqual({
+    expect(developmentPythonServerCommand("config.toml", undefined)).toEqual({
       executable: "uv",
       args: [
         "run",
@@ -121,7 +121,7 @@ describe("PythonServerLifecycle", () => {
         "0",
         "--startup-handshake",
         "--config",
-        "config.json5",
+        "config.toml",
       ],
     });
   });

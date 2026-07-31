@@ -16,7 +16,7 @@ from uuid import uuid4
 import grpc
 
 from hermes.application import AgentService
-from hermes.config import ConfigError, HermesConfig, load_config
+from hermes.config import ConfigError, HermesConfig, default_config_path, load_config
 from hermes.domain import AgentEvent, AgentEventType, TurnStatus
 from hermes.infrastructure.agents_sdk_runner import (
     AgentsSdkRunner,
@@ -331,13 +331,17 @@ def main(argv: list[str] | None = None) -> None:
     config_parser.add_argument("--config")
     config_args, _ = config_parser.parse_known_args(argv)
     config: HermesConfig | None = None
-    if config_args.config is not None:
+    config_path = config_args.config or default_config_path()
+    if config_path is not None:
         try:
-            config = load_config(config_args.config)
+            config = load_config(
+                config_path,
+                defaults=default_config_path() if config_args.config is not None else None,
+            )
         except ConfigError as error:
             config_parser.error(str(error))
     parser = argparse.ArgumentParser(description="启动 Hermes 本地 gRPC Server")
-    parser.add_argument("--config", default=config_args.config)
+    parser.add_argument("--config", default=config_path)
     parser.add_argument("--host", default=config.rpc.host if config is not None else "127.0.0.1")
     parser.add_argument("--port", type=int, default=config.rpc.port if config is not None else 0)
     parser.add_argument("--startup-handshake", action="store_true", help="向 stdout 输出机器可读启动信息")

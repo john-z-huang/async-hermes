@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import tomllib
 from typing import Any
-
-import json5
 
 from hermes.infrastructure.agents_sdk_runner import REASON_EFFECTS
 from hermes.infrastructure.workspace_tools import PERMISSION_PROFILES, resolve_workspace
@@ -18,6 +17,12 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 class ConfigError(ValueError):
     """配置文件无法安全用于启动时抛出。"""
+
+
+def default_config_path(home_directory: Path | None = None) -> Path | None:
+    """返回存在的用户级默认配置，不从 workspace 搜索配置。"""
+    path = (home_directory or Path.home()) / ".async-hermes" / "config.toml"
+    return path if path.exists() else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,16 +88,44 @@ def _boolean(values: dict[str, Any], field: str) -> bool | None:
     return value
 
 
-def load_config(value: str | Path) -> HermesConfig:
-    """加载显式指定的 JSON5 文件；相对 workspace 路径以配置文件为基准。"""
+def _read_config(value: str | Path) -> tuple[Path, dict[str, Any]]:
     path = Path(value).expanduser().resolve()
     if not path.is_file():
         raise ConfigError(f"配置文件必须是已存在的普通文件：{path}")
+    if path.suffix.casefold() == ".json5":
+        raise ConfigError(
+            f"JSON5 配置文件已不再支持：{path}。请将其迁移为 TOML，并使用 hermes.config.example.toml 作为示例。"
+        )
     try:
-        raw = json5.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise ConfigError(f"无法解析 JSON5 配置文件 {path}：{error}") from error
-    root = _mapping(raw, "配置根")
+        with path.open("rb") as config_file:
+            raw = tomllib.load(config_file)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise ConfigError(f"无法解析 TOML 配置文件 {path}：{error}") from error
+    return path, _mapping(raw, "配置根")
+
+
+def _merged_config(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = {**defaults, **overrides}
+    for section in ("rpc", "agent", "tui"):
+        default_section = defaults.get(section)
+        override_section = overrides.get(section)
+        if isinstance(default_section, dict) and isinstance(override_section, dict):
+            merged[section] = {**default_section, **override_section}
+    return merged
+
+
+def load_config(value: str | Path, *, defaults: str | Path | None = None) -> HermesConfig:
+    """加载 TOML 配置；调用方配置的字段覆盖可选用户级默认配置。"""
+    path, root = _read_config(value)
+    overrides = root
+    workspace_base = path.parent
+    if defaults is not None:
+        defaults_path, default_root = _read_config(defaults)
+        root = _merged_config(default_root, root)
+        override_agent = overrides.get("agent")
+        if isinstance(override_agent, dict) and "workspace" not in override_agent:
+            workspace_base = defaults_path.parent
+
     _unknown(root, {"version", "rpc", "agent", "tui"}, "配置根")
     if root.get("version") != CONFIG_VERSION:
         raise ConfigError(f"仅支持配置版本 {CONFIG_VERSION}。")
@@ -114,7 +147,7 @@ def load_config(value: str | Path) -> HermesConfig:
     workspace_value = _string(agent_values, "agent.workspace")
     workspace = None
     if workspace_value is not None:
-        workspace = resolve_workspace(path.parent / workspace_value)
+        workspace = resolve_workspace(workspace_base / workspace_value)
     permissions = _string(agent_values, "agent.permissions")
     if permissions is not None and permissions not in PERMISSION_PROFILES:
         raise ConfigError(f"agent.permissions 不受支持：{permissions}。")

@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { extname, join, resolve } from "node:path";
 
-import JSON5 from "json5";
+import { parse } from "smol-toml";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const REASON_EFFECTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -28,6 +29,29 @@ export interface HermesConfig {
   tui: { showReasoning: boolean };
 }
 
+export function defaultConfigPath(homeDirectory = homedir()): string | undefined {
+  const path = join(homeDirectory, ".async-hermes", "config.toml");
+  return existsSync(path) ? path : undefined;
+}
+
+function mergedConfig(defaults: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...defaults, ...overrides };
+  for (const section of ["rpc", "agent", "tui"]) {
+    const defaultSection = defaults[section];
+    const overrideSection = overrides[section];
+    if (
+      defaultSection &&
+      typeof defaultSection === "object" &&
+      !Array.isArray(defaultSection) &&
+      overrideSection &&
+      typeof overrideSection === "object" &&
+      !Array.isArray(overrideSection)
+    )
+      merged[section] = { ...defaultSection, ...overrideSection };
+  }
+  return merged;
+}
+
 function object(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ConfigError(`${field} 必须是对象。`);
   return value as Record<string, unknown>;
@@ -52,15 +76,24 @@ function boolean(values: Record<string, unknown>, field: string): boolean | unde
   return value;
 }
 
-export function loadConfig(configPath: string): HermesConfig {
+function readConfig(configPath: string): { path: string; root: Record<string, unknown> } {
   const path = resolve(configPath);
+  if (extname(path).toLowerCase() === ".json5")
+    throw new ConfigError(
+      `JSON5 配置文件已不再支持：${path}。请将其迁移为 TOML，并使用 hermes.config.example.toml 作为示例。`,
+    );
   let parsed: unknown;
   try {
-    parsed = JSON5.parse(readFileSync(path, "utf8"));
+    parsed = parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw new ConfigError(`无法解析 JSON5 配置文件 ${path}：${String(error)}`);
+    throw new ConfigError(`无法解析 TOML 配置文件 ${path}：${String(error)}`);
   }
-  const root = object(parsed, "配置根");
+  return { path, root: object(parsed, "配置根") };
+}
+
+export function loadConfig(configPath: string, defaultPath?: string): HermesConfig {
+  const { path, root: overrides } = readConfig(configPath);
+  const root = defaultPath ? mergedConfig(readConfig(defaultPath).root, overrides) : overrides;
   unknown(root, ["version", "rpc", "agent", "tui"], "配置根");
   if (root.version !== 1) throw new ConfigError("仅支持配置版本 1。");
   const rpc = object(root.rpc, "rpc");
