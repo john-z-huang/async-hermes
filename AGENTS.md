@@ -50,3 +50,14 @@ Hermes 是一个基于 Python 的 Code Agent 原型，研究如何将材料密�
 - 规划看板：[Hermes 架构演进 Roadmap](https://github.com/users/john-z-huang/projects/7/views/1)
 
 当需要优化通用开发工作流时，修改 `dev-workflow-standards` Skill 并推送到其 GitHub 仓库，不在本文件中追加通用开发流程内容。
+
+### Skill 版本同步
+
+`docs/dev-workflow-standards.commit` 记录本文件对 Skill 的描述所依据的 Skill commit。读取或更新本文件对 Skill 的描述前，先运行校验：
+
+```bash
+bash scripts/check-dev-workflow-skill.sh
+```
+
+- 输出「已同步」→ 本文件的描述与 Skill 最新 commit 一致，无需处理。
+- 输出「落后」→ 本文件对 Skill 的描述可能过期：请阅读 Skill 的 `SKILL.md`，把其中新增的相关约定补充到上文对应列表，并将 `docs/dev-workflow-standards.commit` 更新为 Skill 最新 commit（本地 `git rev-parse HEAD` 或远端 `git ls-remote` 得到的 commit）。
