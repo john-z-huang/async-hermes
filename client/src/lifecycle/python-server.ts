@@ -18,9 +18,11 @@ export interface PythonServerCommand {
 export function developmentPythonServerCommand(
   configPath?: string,
   pythonExecutable = process.env.HERMES_PYTHON_EXECUTABLE,
+  agentArgs: readonly string[] = [],
 ): PythonServerCommand {
-  const serverArgs = ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"];
+  const serverArgs = ["--host", "127.0.0.1", "--port", "0", "--startup-handshake", "--persist-output"];
   if (configPath) serverArgs.push("--config", configPath);
+  serverArgs.push(...agentArgs);
   if (pythonExecutable)
     return { executable: pythonExecutable, args: ["-m", "hermes.interfaces.grpc_server", ...serverArgs] };
   const args = ["run", "hermes-grpc-server", ...serverArgs];

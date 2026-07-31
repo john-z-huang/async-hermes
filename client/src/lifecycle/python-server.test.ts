@@ -120,6 +120,7 @@ describe("PythonServerLifecycle", () => {
         "--port",
         "0",
         "--startup-handshake",
+        "--persist-output",
         "--config",
         "config.toml",
       ],
@@ -129,7 +130,45 @@ describe("PythonServerLifecycle", () => {
   it("打包运行时仅使用明确指定的 Python 可执行文件", () => {
     expect(developmentPythonServerCommand(undefined, "/app/runtime/python")).toEqual({
       executable: "/app/runtime/python",
-      args: ["-m", "hermes.interfaces.grpc_server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
+      args: [
+        "-m",
+        "hermes.interfaces.grpc_server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--startup-handshake",
+        "--persist-output",
+      ],
+    });
+  });
+
+  it("将 Node Agent 覆盖作为参数数组传给 Python Server", () => {
+    expect(
+      developmentPythonServerCommand("config.toml", "/app/runtime/python", [
+        "--workspace",
+        "/workspace",
+        "--enable-reasoning",
+        "true",
+      ]),
+    ).toEqual({
+      executable: "/app/runtime/python",
+      args: [
+        "-m",
+        "hermes.interfaces.grpc_server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--startup-handshake",
+        "--persist-output",
+        "--config",
+        "config.toml",
+        "--workspace",
+        "/workspace",
+        "--enable-reasoning",
+        "true",
+      ],
     });
   });
 
