@@ -145,6 +145,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--user-prompt", default=agent_config.user_prompt if agent_config and agent_config.user_prompt is not None else USER_PROMPT)
     parser.add_argument("--content", default=agent_config.content if agent_config and agent_config.content is not None else "")
     parser.add_argument(
+        "--default-model",
+        default=agent_config.model if agent_config and agent_config.model is not None else None,
+    )
+    parser.add_argument(
         "--enable-stream-output",
         nargs="?", const=True, type=_parse_boolean, default=True,
     )
@@ -182,6 +186,7 @@ def build_service(args: argparse.Namespace) -> AgentService:
             system_prompt=args.system_prompt,
             user_prompt=args.user_prompt,
             content=args.content,
+            model=args.default_model,
             enable_reasoning=args.enable_reasoning,
             reason_effect=args.reason_effect,
             workspace=args.workspace,
