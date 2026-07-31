@@ -376,6 +376,9 @@ class ParseArgsTests(unittest.TestCase):
     def test_defaults_and_one_shot_validation(self) -> None:
         with patch(
             "hermes.interfaces.cli.Path.cwd", return_value=Path("/tmp")
+        ), patch(
+            # 隔离本机 ~/.async-hermes/config.toml，验证无配置时默认 workspace 为 cwd。
+            "hermes.interfaces.cli.default_config_path", return_value=None
         ):
             args = cli.parse_args([])
         self.assertEqual(args.running_mode, "loop")

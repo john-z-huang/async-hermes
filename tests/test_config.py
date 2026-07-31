@@ -22,7 +22,12 @@ def write_config(path: Path, body: str) -> Path:
     return config
 
 
-def test_loads_shared_toml_config_and_resolves_workspace_from_config(tmp_path: Path) -> None:
+def test_loads_shared_toml_config_and_resolves_workspace_from_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+    monkeypatch.chdir(run_directory)
     config = write_config(
         tmp_path,
         """# TOML 注释必须可用。
@@ -45,9 +50,35 @@ def test_loads_shared_toml_config_and_resolves_workspace_from_config(tmp_path: P
     loaded = load_config(config)
     assert loaded.rpc.port == 50051
     assert loaded.rpc.startup_timeout_ms == 10000
-    assert loaded.agent.workspace == tmp_path.resolve()
+    assert loaded.agent.workspace == run_directory.resolve()
     assert loaded.agent.enable_reasoning is True
     assert loaded.tui.show_reasoning is True
+
+
+def test_relative_workspace_resolves_against_cwd_not_config_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+    config_directory = tmp_path / "config"
+    config_directory.mkdir()
+    monkeypatch.chdir(run_directory)
+
+    config = write_config(
+        config_directory,
+        """version = 1
+        [rpc]
+        host = "127.0.0.1"
+        port = 50051
+        [agent]
+        workspace = "."
+        """,
+    )
+    loaded = load_config(config)
+
+    # 相对 workspace 相对运行时的当前目录解析，而非配置文件所在目录。
+    assert loaded.agent.workspace == run_directory.resolve()
+    assert loaded.agent.workspace != config_directory.resolve()
 
 
 @pytest.mark.parametrize(
@@ -65,7 +96,12 @@ def test_rejects_invalid_or_unsafe_config(tmp_path: Path, body: str, message: st
         load_config(write_config(tmp_path, body))
 
 
-def test_cli_config_values_are_defaults_and_cli_explicit_value_wins(tmp_path: Path) -> None:
+def test_cli_config_values_are_defaults_and_cli_explicit_value_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+    monkeypatch.chdir(run_directory)
     config = write_config(
         tmp_path,
         """version = 1
@@ -79,7 +115,7 @@ def test_cli_config_values_are_defaults_and_cli_explicit_value_wins(tmp_path: Pa
         """,
     )
     args = cli.parse_args(["--config", str(config)])
-    assert args.workspace == tmp_path.resolve()
+    assert args.workspace == run_directory.resolve()
     assert args.enable_reasoning is True
     assert args.reason_effect == "high"
     overridden = cli.parse_args(["--config", str(config), "--enable-reasoning", "false"])
@@ -114,7 +150,12 @@ def test_loads_user_default_config_outside_workspace(tmp_path: Path, monkeypatch
     assert args.workspace == workspace
 
 
-def test_explicit_config_overrides_matching_user_defaults(tmp_path: Path) -> None:
+def test_explicit_config_overrides_matching_user_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+    monkeypatch.chdir(run_directory)
     global_directory = tmp_path / ".async-hermes"
     global_directory.mkdir()
     global_config = global_directory / "config.toml"
@@ -148,5 +189,6 @@ enableReasoning = true
     assert loaded.rpc.host == "127.0.0.1"
     assert loaded.rpc.port == 60000
     assert loaded.agent.enable_reasoning is True
-    assert loaded.agent.workspace == global_directory.resolve()
+    # 用户级默认配置中的相对 workspace 相对运行时的当前目录解析。
+    assert loaded.agent.workspace == run_directory.resolve()
     assert loaded.tui.show_reasoning is False
