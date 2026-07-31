@@ -1,4 +1,4 @@
-import { defaultConfigPath, loadConfig } from "./config.js";
+import { ensureDefaultConfig, loadConfig } from "./config.js";
 
 export interface CliOptions {
   address: string;
@@ -9,7 +9,7 @@ export interface CliOptions {
 
 export function optionsFromArgs(
   argv: string[],
-  defaultPath: string | null | undefined = defaultConfigPath(),
+  defaultPath: string | null | undefined = ensureDefaultConfig(),
 ): CliOptions {
   const addressIndex = argv.indexOf("--address");
   const configIndex = argv.indexOf("--config");
