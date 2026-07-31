@@ -19,6 +19,7 @@
     "test:all": "npm test && npm run test:cross-language",
     "build:bundle": "vite build",
     "build": "npm run build:bundle && node --build-sea sea-config.json && node scripts/sign-sea.js",
+    "build:release": "bash ./scripts/build-release.sh",
     "tui": "npm run build && ./dist/hermes"
   },
   "devDependencies": {

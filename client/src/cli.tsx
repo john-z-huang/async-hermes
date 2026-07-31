@@ -19,7 +19,9 @@ async function main(): Promise<void> {
     return;
   }
   const lifecycle = new PythonServerLifecycle({
-    command: isPackagedSeaRuntime() ? packagedPythonServerCommand() : developmentPythonServerCommand(options.configPath),
+    command: isPackagedSeaRuntime()
+      ? packagedPythonServerCommand()
+      : developmentPythonServerCommand(options.configPath),
     onUnexpectedExit: (message) => console.error(message),
   });
   let signalCount = 0;
