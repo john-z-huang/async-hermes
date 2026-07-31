@@ -55,6 +55,11 @@ describe("共享 TOML 配置", () => {
     expect(optionsFromArgs(["--config", path, "--address", "localhost:60000"])).toEqual({
       address: "localhost:60000",
       configPath: path,
+      enableStreamOutput: true,
+      externalServerNotice: expect.stringContaining("不会应用"),
+      initialQuestion: undefined,
+      pythonServerArgs: [],
+      runningMode: "loop",
       showReasoning: true,
       startPythonServer: false,
     });
@@ -130,5 +135,81 @@ describe("共享 TOML 配置", () => {
 
   it("未指定地址时默认由 Node 托管 Python Server", () => {
     expect(optionsFromArgs([], null).startPythonServer).toBe(true);
+  });
+
+  it("解析与 Python CLI 对齐的运行配置并保持命令行优先级", () => {
+    const path = configFile('version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051\n[tui]\nshowReasoning = false');
+
+    expect(
+      optionsFromArgs(
+        [
+          "--config",
+          path,
+          "--question",
+          "总结项目",
+          "--running-mode",
+          "one-shot",
+          "--system-prompt",
+          "system",
+          "--user-prompt",
+          "user",
+          "--content",
+          "",
+          "--enable-stream-output",
+          "false",
+          "--enable-reasoning",
+          "true",
+          "--reason-effect",
+          "high",
+          "--workspace",
+          ".",
+          "--output-file",
+          "results/answer.txt",
+          "--permissions",
+          "read-only",
+        ],
+        null,
+      ),
+    ).toMatchObject({
+      enableStreamOutput: false,
+      initialQuestion: "总结项目",
+      pythonServerArgs: [
+        "--system-prompt",
+        "system",
+        "--user-prompt",
+        "user",
+        "--content",
+        "",
+        "--enable-reasoning",
+        "true",
+        "--reason-effect",
+        "high",
+        "--workspace",
+        ".",
+        "--output-file",
+        "results/answer.txt",
+        "--permissions",
+        "read-only",
+      ],
+      runningMode: "one-shot",
+      showReasoning: true,
+      startPythonServer: true,
+    });
+  });
+
+  it("拒绝缺少问题的 one-shot 与外部 Server 无法应用的 Agent 覆盖", () => {
+    expect(() => optionsFromArgs(["--running-mode", "one-shot"], null)).toThrow("--question");
+    expect(() => optionsFromArgs(["--address", "127.0.0.1:50051", "--workspace", "."], null)).toThrow(
+      "外部 Python Server",
+    );
+  });
+
+  it("连接外部 Server 时明确提示本地 agent 配置不会应用", () => {
+    const path = configFile('version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051\n[agent]\npermissions = "read-only"');
+
+    expect(optionsFromArgs(["--config", path, "--address", "127.0.0.1:50051"], null)).toMatchObject({
+      externalServerNotice: expect.stringContaining("不会应用"),
+      startPythonServer: false,
+    });
   });
 });

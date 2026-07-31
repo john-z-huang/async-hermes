@@ -36,6 +36,19 @@ class BlockingMockHermesClient extends MockHermesClient {
   }
 }
 
+class FailingMockHermesClient extends MockHermesClient {
+  public override runTurn(sessionId: string, userInput: string) {
+    this.runRequests.push({ sessionId, userInput });
+    return {
+      events: (async function* (): AsyncIterable<AgentEvent> {
+        yield* [];
+        throw new Error("fixture failure");
+      })(),
+      cancel: () => undefined,
+    };
+  }
+}
+
 describe("Hermes TUI", () => {
   it("使用 mock client 创建会话，不需要网络或 API key", async () => {
     const client = new MockHermesClient();
@@ -84,6 +97,51 @@ describe("Hermes TUI", () => {
     expect(client.cancelled).toEqual([{ sessionId: "mock-session", turnId: "turn-1" }]);
     expect(client.streamCancelled).toBe(false);
     expect(view.lastFrame()).toContain("[cancelled] 本轮已取消。");
+    view.unmount();
+  });
+
+  it("one-shot 模式自动提交初始问题并在终态后退出", async () => {
+    const client = new MockHermesClient([
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 1, turnStarted: {} },
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 2, turnCompleted: { finalOutput: "完成" } },
+    ]);
+    const view = render(<App client={client} initialQuestion="  自动问题  " runningMode="one-shot" />);
+    await delay();
+    await delay();
+
+    expect(client.runRequests).toEqual([{ sessionId: "mock-session", userInput: "自动问题" }]);
+    expect(view.frames.join("\n")).toContain("one-shot 模式");
+    expect(view.frames.join("\n")).toContain("[completed] 完成");
+  });
+
+  it("one-shot 模式在 RPC 失败后显示错误并退出", async () => {
+    const client = new FailingMockHermesClient();
+    const view = render(<App client={client} initialQuestion="问题" runningMode="one-shot" />);
+    await delay();
+    await delay();
+
+    expect(client.runRequests).toEqual([{ sessionId: "mock-session", userInput: "问题" }]);
+    expect(view.frames.join("\n")).toContain("fixture failure");
+  });
+
+  it("关闭流式展示时只显示终态输出", async () => {
+    const client = new MockHermesClient([
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 1, turnStarted: {} },
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 2, reasoningDelta: { text: "分析" } },
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 3, contentDelta: { text: "增量" } },
+      { sessionId: "mock-session", turnId: "turn-1", sequence: 4, turnCompleted: { finalOutput: "最终答案" } },
+    ]);
+    const view = render(<App client={client} enableStreamOutput={false} showReasoning />);
+    await delay();
+
+    view.stdin.write("问题");
+    await delay();
+    view.stdin.write("\r");
+    await delay();
+
+    expect(view.lastFrame()).not.toContain("[reasoning] 分析");
+    expect(view.lastFrame()).not.toContain("[content] 增量");
+    expect(view.lastFrame()).toContain("[completed] 最终答案");
     view.unmount();
   });
 });

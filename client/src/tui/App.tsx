@@ -3,6 +3,7 @@ import TextInput from "ink-text-input";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentEvent } from "../generated/v1/agent.js";
+import type { RunningMode } from "../cli-options.js";
 import type { HermesRpcClient, TurnSubscription } from "../rpc/hermes-client.js";
 import { RpcConnectionError } from "../rpc/hermes-client.js";
 import { applyAgentEvent, initialTuiState, selectSession, type DisplayEvent } from "./state.js";
@@ -15,6 +16,9 @@ interface ActiveTurn {
 
 export interface AppProps {
   client: HermesRpcClient;
+  enableStreamOutput?: boolean;
+  initialQuestion?: string;
+  runningMode?: RunningMode;
   showReasoning?: boolean;
 }
 
@@ -40,13 +44,21 @@ function EventLine({ event }: { event: DisplayEvent }) {
 }
 
 /** React/Ink 终端视图：只管理展示状态，业务历史始终留在 Python 服务。 */
-export function App({ client, showReasoning = false }: AppProps) {
+export function App({
+  client,
+  enableStreamOutput = true,
+  initialQuestion,
+  runningMode = "loop",
+  showReasoning = false,
+}: AppProps) {
   const { exit } = useApp();
   const [state, setState] = useState(initialTuiState);
   const [input, setInput] = useState("");
   const [activeTurnId, setActiveTurnId] = useState<string>();
+  const [oneShotFinished, setOneShotFinished] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(0);
   const activeTurn = useRef<ActiveTurn | undefined>(undefined);
+  const initialQuestionPending = useRef(initialQuestion?.trim() || undefined);
   const selectedSession = useRef<string | undefined>(undefined);
 
   const createSession = useCallback(async () => {
@@ -59,6 +71,41 @@ export function App({ client, showReasoning = false }: AppProps) {
     }
   }, [client]);
 
+  const consumeEvent = useCallback(
+    (event: AgentEvent) => {
+      if (activeTurn.current) activeTurn.current.turnId = event.turnId;
+      setState((previous) => applyAgentEvent(previous, event));
+      if (event.turnCompleted || event.turnFailed || event.turnCancelled) {
+        setActiveTurnId(undefined);
+        if (runningMode === "one-shot") setOneShotFinished(true);
+      }
+    },
+    [runningMode],
+  );
+
+  const submit = useCallback(
+    async (value: string) => {
+      const question = value.trim();
+      const sessionId = selectedSession.current;
+      if (!question || !sessionId || activeTurn.current) return;
+      setInput("");
+      const subscription = client.runTurn(sessionId, question);
+      activeTurn.current = { sessionId, subscription };
+      setActiveTurnId("pending");
+      try {
+        for await (const event of subscription.events) consumeEvent(event);
+      } catch (error) {
+        const label = error instanceof RpcConnectionError ? "连接错误" : "RPC 错误";
+        setState((previous) => ({ ...previous, connectionError: `${label}：${String(error)}` }));
+        if (runningMode === "one-shot") setOneShotFinished(true);
+      } finally {
+        activeTurn.current = undefined;
+        setActiveTurnId(undefined);
+      }
+    },
+    [client, consumeEvent, runningMode],
+  );
+
   useEffect(() => {
     void createSession();
     return () => {
@@ -67,30 +114,16 @@ export function App({ client, showReasoning = false }: AppProps) {
     };
   }, [client, createSession]);
 
-  const consumeEvent = (event: AgentEvent) => {
-    if (activeTurn.current) activeTurn.current.turnId = event.turnId;
-    setState((previous) => applyAgentEvent(previous, event));
-    if (event.turnCompleted || event.turnFailed || event.turnCancelled) setActiveTurnId(undefined);
-  };
+  useEffect(() => {
+    if (!state.selectedSessionId || !initialQuestionPending.current) return;
+    const question = initialQuestionPending.current;
+    initialQuestionPending.current = undefined;
+    void submit(question);
+  }, [state.selectedSessionId, submit]);
 
-  const submit = async (value: string) => {
-    const question = value.trim();
-    const sessionId = selectedSession.current;
-    if (!question || !sessionId || activeTurn.current) return;
-    setInput("");
-    const subscription = client.runTurn(sessionId, question);
-    activeTurn.current = { sessionId, subscription };
-    setActiveTurnId("pending");
-    try {
-      for await (const event of subscription.events) consumeEvent(event);
-    } catch (error) {
-      const label = error instanceof RpcConnectionError ? "连接错误" : "RPC 错误";
-      setState((previous) => ({ ...previous, connectionError: `${label}：${String(error)}` }));
-    } finally {
-      activeTurn.current = undefined;
-      setActiveTurnId(undefined);
-    }
-  };
+  useEffect(() => {
+    if (oneShotFinished) exit();
+  }, [exit, oneShotFinished]);
 
   const cancel = async () => {
     const active = activeTurn.current;
@@ -124,6 +157,10 @@ export function App({ client, showReasoning = false }: AppProps) {
   const selectedEvents = Object.values(state.turns)
     .flatMap((turn) => turn.events)
     .filter((event) => showReasoning || event.kind !== "reasoning")
+    .filter(
+      (event) =>
+        enableStreamOutput || event.kind === "completed" || event.kind === "failed" || event.kind === "cancelled",
+    )
     .slice(scrollOffset);
 
   return (
@@ -144,15 +181,19 @@ export function App({ client, showReasoning = false }: AppProps) {
           selectedEvents.map((event) => <EventLine key={`${event.sequence}-${event.kind}`} event={event} />)
         )}
       </Box>
-      <Box marginTop={1}>
-        <Text color="cyan">&gt; </Text>
-        <TextInput
-          value={input}
-          onChange={setInput}
-          onSubmit={(value) => void submit(value)}
-          placeholder="输入问题后按 Enter"
-        />
-      </Box>
+      {runningMode === "loop" ? (
+        <Box marginTop={1}>
+          <Text color="cyan">&gt; </Text>
+          <TextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={(value) => void submit(value)}
+            placeholder="输入问题后按 Enter"
+          />
+        </Box>
+      ) : (
+        <Text dimColor>one-shot 模式：本轮结束后自动退出</Text>
+      )}
     </Box>
   );
 }
