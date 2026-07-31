@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import tomllib
 from typing import Any
-
-import json5
 
 from hermes.infrastructure.agents_sdk_runner import REASON_EFFECTS
 from hermes.infrastructure.workspace_tools import PERMISSION_PROFILES, resolve_workspace
@@ -84,14 +83,19 @@ def _boolean(values: dict[str, Any], field: str) -> bool | None:
 
 
 def load_config(value: str | Path) -> HermesConfig:
-    """加载显式指定的 JSON5 文件；相对 workspace 路径以配置文件为基准。"""
+    """加载显式指定的 TOML 文件；相对 workspace 路径以配置文件为基准。"""
     path = Path(value).expanduser().resolve()
     if not path.is_file():
         raise ConfigError(f"配置文件必须是已存在的普通文件：{path}")
+    if path.suffix.casefold() == ".json5":
+        raise ConfigError(
+            f"JSON5 配置文件已不再支持：{path}。请将其迁移为 TOML，并使用 hermes.config.example.toml 作为示例。"
+        )
     try:
-        raw = json5.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise ConfigError(f"无法解析 JSON5 配置文件 {path}：{error}") from error
+        with path.open("rb") as config_file:
+            raw = tomllib.load(config_file)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise ConfigError(f"无法解析 TOML 配置文件 {path}：{error}") from error
     root = _mapping(raw, "配置根")
     _unknown(root, {"version", "rpc", "agent", "tui"}, "配置根")
     if root.get("version") != CONFIG_VERSION:

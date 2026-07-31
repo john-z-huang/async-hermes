@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
-import JSON5 from "json5";
+import { parse } from "smol-toml";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const REASON_EFFECTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -54,11 +54,15 @@ function boolean(values: Record<string, unknown>, field: string): boolean | unde
 
 export function loadConfig(configPath: string): HermesConfig {
   const path = resolve(configPath);
+  if (extname(path).toLowerCase() === ".json5")
+    throw new ConfigError(
+      `JSON5 配置文件已不再支持：${path}。请将其迁移为 TOML，并使用 hermes.config.example.toml 作为示例。`,
+    );
   let parsed: unknown;
   try {
-    parsed = JSON5.parse(readFileSync(path, "utf8"));
+    parsed = parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw new ConfigError(`无法解析 JSON5 配置文件 ${path}：${String(error)}`);
+    throw new ConfigError(`无法解析 TOML 配置文件 ${path}：${String(error)}`);
   }
   const root = object(parsed, "配置根");
   unknown(root, ["version", "rpc", "agent", "tui"], "配置根");

@@ -24,26 +24,27 @@ py-hermes --running-mode one-shot --question "总结当前项目"
 
 `py-hermes` 是原 Python CLI。`--workspace` 省略时仍使用执行命令时的当前目录。源码变更会由可编辑安装立即生效；更新依赖后可执行 `uv tool install --editable . --force` 刷新工具环境。
 
-## 共享 JSON5 配置
+## 共享 TOML 配置
 
-`hermes.config.example.json5` 是可提交的非敏感配置示例。复制为本机的
-`hermes.config.json5` 后，使用同一个**显式路径**启动各入口：
+`hermes.config.example.toml` 是可提交的非敏感配置示例。复制为本机的
+`hermes.config.toml` 后，使用同一个**显式路径**启动各入口：
 
 ```bash
-py-hermes --config ./hermes.config.json5
-uv run hermes-grpc-server --config ./hermes.config.json5
-npm run tui -- --config ./hermes.config.json5
+py-hermes --config ./hermes.config.toml
+uv run hermes-grpc-server --config ./hermes.config.toml
+npm run tui -- --config ./hermes.config.toml
 ```
 
-配置文件必须包含 `version: 1` 与 `rpc.host`、`rpc.port`。支持的共享字段包括
+配置文件必须包含 `version = 1` 与 `rpc.host`、`rpc.port`。支持的共享字段包括
 RPC loopback 地址、端口和启动超时，Agent 的 workspace、权限、推理和提示词，以及
 TUI 是否显示推理。`agent.workspace` 相对路径以配置文件所在目录为基准；Python 会在
 启动前确认它存在，且 workspace/权限安全边界始终由 Python 执行。
 
-优先级为：显式命令行参数 > 已说明的环境变量 > JSON5 文件 > 现有安全内置默认值。
+优先级为：显式命令行参数 > 已说明的环境变量 > TOML 文件 > 现有安全内置默认值。
 当前仅保留 `HERMES_GRPC_ADDRESS` 作为 TUI 的地址环境变量覆盖；`--address` 优先级更高。
-未指定 `--config` 时保留此前 CLI、gRPC Server 和 TUI 的默认行为。JSON5 解析失败、未知
-版本、未知字段及非法 host/port/权限会阻止启动并显示诊断信息。
+未指定 `--config` 时保留此前 CLI、gRPC Server 和 TUI 的默认行为。TOML 解析失败、未知
+版本、未知字段及非法 host/port/权限会阻止启动并显示诊断信息。旧 `.json5` 文件会在启动前
+给出迁移提示；请按示例改写为 TOML 并使用 `.toml` 路径。
 
 严禁将 `OPENAI_API_KEY`、令牌、密码、完整环境变量或 SDK 历史写入此文件。它已被
 `.gitignore` 忽略；只提交示例文件和说明。
@@ -101,7 +102,7 @@ loopback 临时端口，读取 stdout 中唯一的 JSON 启动握手，再通过
 协议版本校验后才显示可交互 TUI：
 
 ```bash
-npm run tui -- --config ./hermes.config.json5
+npm run tui -- --config ./hermes.config.toml
 ```
 
 开发模式使用 `uv run hermes-grpc-server`。打包模式必须由安装器或启动器设置
@@ -113,14 +114,14 @@ npm run tui -- --config ./hermes.config.json5
 `HERMES_GRPC_ADDRESS`），此时 TUI 不管理该进程：
 
 ```bash
-uv run hermes-grpc-server --config ./hermes.config.json5
+uv run hermes-grpc-server --config ./hermes.config.toml
 npm run tui -- --address 127.0.0.1:50051
 ```
 
 也可在构建后直接运行二进制文件：
 
 ```bash
-./dist/hermes --config ./hermes.config.json5
+./dist/hermes --config ./hermes.config.toml
 ```
 
 TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
