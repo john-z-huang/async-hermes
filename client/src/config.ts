@@ -1,11 +1,31 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const REASON_EFFECTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+
+// 与 hermes.config.example.toml 保持一致；打包为 SEA 后无法在运行时读取仓库内模板文件，
+// 因此将默认配置内容内嵌于此。
+const DEFAULT_CONFIG_TEMPLATE = `# Hermes 非敏感运行配置示例。请勿在此文件存放 API key、令牌或密码。
+version = 1
+
+[rpc]
+host = "127.0.0.1"
+port = 50051
+startupTimeoutMs = 10000
+
+[agent]
+workspace = "."
+permissions = "read-only"
+enableReasoning = false
+reasonEffect = "medium"
+
+[tui]
+showReasoning = false
+`;
 
 export class ConfigError extends Error {
   public constructor(message: string) {
@@ -32,6 +52,15 @@ export interface HermesConfig {
 export function defaultConfigPath(homeDirectory = homedir()): string | undefined {
   const path = join(homeDirectory, ".async-hermes", "config.toml");
   return existsSync(path) ? path : undefined;
+}
+
+// 确保用户级默认配置存在且非空：文件缺失或内容为空时，按模板内容创建 `~/.async-hermes/config.toml`。
+export function ensureDefaultConfig(homeDirectory = homedir()): string {
+  const path = join(homeDirectory, ".async-hermes", "config.toml");
+  if (existsSync(path) && readFileSync(path, "utf8").trim() !== "") return path;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, DEFAULT_CONFIG_TEMPLATE, "utf8");
+  return path;
 }
 
 function mergedConfig(defaults: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {

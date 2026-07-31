@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { ConfigError, defaultConfigPath, loadConfig } from "./config.js";
+import { ConfigError, defaultConfigPath, ensureDefaultConfig, loadConfig } from "./config.js";
 import { optionsFromArgs } from "./cli-options.js";
 
 function configFile(body: string): string {
@@ -70,6 +70,38 @@ describe("共享 TOML 配置", () => {
       if (original === undefined) delete process.env.HERMES_GRPC_ADDRESS;
       else process.env.HERMES_GRPC_ADDRESS = original;
     }
+  });
+
+  it("默认配置缺失时按模板创建", () => {
+    const home = mkdtempSync(join(tmpdir(), "hermes-home-"));
+    const path = join(home, ".async-hermes", "config.toml");
+
+    expect(ensureDefaultConfig(home)).toBe(path);
+    expect(existsSync(path)).toBe(true);
+    expect(readFileSync(path, "utf8")).toContain("version = 1");
+    expect(loadConfig(path)).toMatchObject({ rpc: { host: "127.0.0.1", port: 50051 } });
+  });
+
+  it("默认配置内容为空时按模板重新创建", () => {
+    const home = mkdtempSync(join(tmpdir(), "hermes-home-"));
+    const directory = join(home, ".async-hermes");
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, "config.toml");
+    writeFileSync(path, "", "utf8");
+
+    expect(ensureDefaultConfig(home)).toBe(path);
+    expect(readFileSync(path, "utf8")).toContain("version = 1");
+  });
+
+  it("默认配置非空时保持不变", () => {
+    const home = mkdtempSync(join(tmpdir(), "hermes-home-"));
+    const directory = join(home, ".async-hermes");
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, "config.toml");
+    writeFileSync(path, 'version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051');
+
+    expect(ensureDefaultConfig(home)).toBe(path);
+    expect(readFileSync(path, "utf8")).toContain("port = 50051");
   });
 
   it("从用户目录读取默认配置，并允许使用其他 workspace", () => {
