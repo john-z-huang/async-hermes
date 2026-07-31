@@ -10,10 +10,7 @@ function seaRequireFix(): Plugin {
     generateBundle(_, bundle) {
       for (const chunk of Object.values(bundle)) {
         if (chunk.type === "chunk") {
-          chunk.code = chunk.code.replace(
-            /createRequire\(import\.meta\.url\)/g,
-            "createRequire(process.execPath)",
-          );
+          chunk.code = chunk.code.replace(/createRequire\(import\.meta\.url\)/g, "createRequire(process.execPath)");
         }
       }
     },
