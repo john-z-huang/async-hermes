@@ -10,7 +10,13 @@ import grpc
 import pytest
 
 from hermes.application import AgentService, RunnerEvent, RunnerEventType, TurnRequest
-from hermes.interfaces.grpc_server import HermesGrpcServer, write_startup_handshake
+from hermes.interfaces import grpc_server
+from hermes.interfaces.grpc_server import (
+    HermesGrpcServer,
+    PersistingRunner,
+    parse_args,
+    write_startup_handshake,
+)
 from hermes.interfaces.generated.v1 import agent_pb2, agent_pb2_grpc
 
 
@@ -269,3 +275,119 @@ def test_startup_handshake_is_machine_readable_and_contains_no_configuration() -
         "protocol_version": "v1",
         "type": "hermes-started",
     }
+
+
+def test_grpc_cli_accepts_agent_overrides(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(grpc_server, "default_config_path", lambda: None)
+
+    args = parse_args(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--system-prompt",
+            "system",
+            "--user-prompt",
+            "user",
+            "--content",
+            "content",
+            "--enable-reasoning",
+            "true",
+            "--reason-effect",
+            "high",
+            "--permissions",
+            "read-only",
+            "--output-file",
+            "results/answer.txt",
+            "--persist-output",
+        ]
+    )
+
+    assert args.workspace == tmp_path.resolve()
+    assert args.system_prompt == "system"
+    assert args.user_prompt == "user"
+    assert args.content == "content"
+    assert args.enable_reasoning is True
+    assert args.reason_effect == "high"
+    assert args.permissions == "read-only"
+    assert args.output_file == "results/answer.txt"
+    assert args.persist_output is True
+
+
+def test_grpc_server_persists_completed_output_inside_workspace(tmp_path) -> None:
+    async def run() -> None:
+        harness = GrpcHarness(
+            PersistingRunner(
+                FakeRunner(
+                    [
+                        RunnerEvent(
+                            RunnerEventType.COMPLETED,
+                            "answer",
+                            history=("history",),
+                        )
+                    ]
+                ),
+                workspace=tmp_path,
+                output_file="results/answer.txt",
+            )
+        )
+        await harness.start()
+        try:
+            await harness.stub.CreateSession(
+                agent_pb2.CreateSessionRequest(session_id="one")
+            )
+            events = await collect(
+                harness.stub.RunTurn(
+                    agent_pb2.RunTurnRequest(
+                        session_id="one",
+                        user_input="question",
+                    )
+                )
+            )
+            assert events[-1].WhichOneof("payload") == "turn_completed"
+            assert (tmp_path / "results" / "answer.txt").read_text() == "answer"
+        finally:
+            await harness.close()
+
+    asyncio.run(run())
+
+
+def test_persistence_failure_keeps_turn_and_history_transactional(tmp_path) -> None:
+    async def run() -> None:
+        harness = GrpcHarness(
+            PersistingRunner(
+                FakeRunner(
+                    [
+                        RunnerEvent(
+                            RunnerEventType.COMPLETED,
+                            "answer",
+                            history=("must-not-commit",),
+                        )
+                    ]
+                ),
+                workspace=tmp_path,
+                output_file="../outside.txt",
+            )
+        )
+        await harness.start()
+        try:
+            await harness.stub.CreateSession(
+                agent_pb2.CreateSessionRequest(session_id="one")
+            )
+            events = await collect(
+                harness.stub.RunTurn(
+                    agent_pb2.RunTurnRequest(
+                        session_id="one",
+                        user_input="question",
+                    )
+                )
+            )
+            assert events[-1].WhichOneof("payload") == "turn_failed"
+            snapshot = await harness.stub.GetSession(
+                agent_pb2.GetSessionRequest(session_id="one")
+            )
+            assert snapshot.turns[0].status == agent_pb2.TURN_STATUS_FAILED
+            assert harness.service.get_session("one").history == []
+        finally:
+            await harness.close()
+
+    asyncio.run(run())
