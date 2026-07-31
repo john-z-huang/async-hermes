@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import { ServingStatus, type HealthCheckResponse } from "../generated/v1/agent.js";
 import type { HermesRpcClient } from "../rpc/hermes-client.js";
-import { developmentPythonServerCommand, PythonServerLifecycle, PythonServerStartupError } from "./python-server.js";
+import {
+  developmentPythonServerCommand,
+  isPackagedSeaRuntime,
+  packagedPythonServerCommand,
+  PythonServerLifecycle,
+  PythonServerStartupError,
+} from "./python-server.js";
 
 class FakeChild extends EventEmitter {
   public readonly stdout = new PassThrough();
@@ -50,7 +56,7 @@ describe("PythonServerLifecycle", () => {
       createClient: () => client(serving),
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
 
     await expect(starting).resolves.toBeDefined();
     expect(invoked).toEqual(["run", "hermes-grpc-server"]);
@@ -65,7 +71,7 @@ describe("PythonServerLifecycle", () => {
       spawn: () => unsafe as never,
     });
     const starting = lifecycle.start();
-    unsafe.stdout.write('{"type":"hermes-started","address":"0.0.0.0:1","protocol_version":"v1"}\n');
+    unsafe.stdout.write('{"type":"hermes-started","address":"0.0.0.0:1","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await expect(starting).rejects.toThrow("启动地址不安全");
 
     const exited = new FakeChild();
@@ -75,6 +81,19 @@ describe("PythonServerLifecycle", () => {
     }).start();
     exited.emit("exit", 1, null);
     await expect(exiting).rejects.toBeInstanceOf(PythonServerStartupError);
+  });
+
+  it("拒绝版本不匹配的 Python Server", async () => {
+    const child = new FakeChild();
+    const lifecycle = new PythonServerLifecycle({
+      command: { executable: "hermes-server", args: [] },
+      spawn: () => child as never,
+    });
+    const starting = lifecycle.start();
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.2.0","python_package_version":"0.2.0"}\n');
+
+    await expect(starting).rejects.toThrow("Python Server 版本不兼容");
+    expect(child.signals).toEqual(["SIGTERM"]);
   });
 
   it("启动超时后回收子进程", async () => {
@@ -101,7 +120,7 @@ describe("PythonServerLifecycle", () => {
       },
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await starting;
 
     child.emit("exit", 23, null);
@@ -133,6 +152,15 @@ describe("PythonServerLifecycle", () => {
     });
   });
 
+  it("发布运行时从同目录的受控 Server 二进制启动", () => {
+    expect(packagedPythonServerCommand("/app/hermes-server")).toEqual({
+      executable: "/app/hermes-server",
+      args: ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
+    });
+    expect(isPackagedSeaRuntime({ sea: "1" } as unknown as NodeJS.ProcessVersions)).toBe(true);
+    expect(isPackagedSeaRuntime({ node: "26" } as unknown as NodeJS.ProcessVersions)).toBe(false);
+  });
+
   it("强制停止会立即终止仍在运行的子进程", async () => {
     const child = new FakeChild();
     const lifecycle = new PythonServerLifecycle({
@@ -141,7 +169,7 @@ describe("PythonServerLifecycle", () => {
       createClient: () => client(serving),
     });
     const starting = lifecycle.start();
-    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1"}\n');
+    child.stdout.write('{"type":"hermes-started","address":"127.0.0.1:54321","protocol_version":"v1","release_version":"0.1.0","python_package_version":"0.1.0"}\n');
     await starting;
 
     lifecycle.forceStop();

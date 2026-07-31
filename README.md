@@ -128,6 +128,28 @@ npm run tui -- --address 127.0.0.1:50051
 ./dist/hermes --config ./hermes.config.toml
 ```
 
+## 平台发布构建
+
+交互式发布包采用 Node SEA TUI 与 Python Server 平台可执行文件的组合；具体取舍和版本兼容规则见
+[`docs/adr/0001-dual-runtime-distribution.md`](docs/adr/0001-dual-runtime-distribution.md)。构建机必须先
+使用 lockfile 安装依赖，且不得依赖全局 `protoc`、Python 包或 PyInstaller：
+
+```bash
+npm ci
+uv sync --group dev
+npm run build:release -- macos-arm64
+```
+
+最后一个参数是构建机实际生成的目标平台标识，例如 `macos-arm64`、`linux-x64` 或 `win32-x64`；
+不得将不同系统或 CPU 架构的二进制混合到同一归档。构建输出为
+`dist/release/<target>/`，只包含 `hermes`、`hermes-server`（Windows 为 `.exe`）、
+`release-manifest.json`、`dependency-inventory.json` 与 `checksums.sha256`。其中清单记录 Node、Python
+和 Protocol 版本；校验文件覆盖所有发布元数据和两个可执行文件。
+
+发布模式下 SEA TUI 仅从自身同目录启动 `hermes-server`，不会搜索用户机器上的 Python。源码开发模式
+仍通过 `uv run hermes-grpc-server` 启动服务。Python headless/one-shot 入口 `py-hermes` 保持可用。
+平台支持矩阵、安装、升级、回滚、卸载和故障排查见 [`docs/RELEASE.md`](docs/RELEASE.md)。
+
 TUI 只保存会话选择和展示事件，不保存或重建 Agents SDK 历史。快捷键：`n` 新建会话、`Tab` 切换会话、`Ctrl+X` 取消、方向键滚动、`Ctrl+C` 退出。
 正常退出、`SIGINT`、`SIGTERM` 或未捕获异常都会关闭 gRPC client，并向 Python 发送
 `SIGTERM`；超时后升级为 `SIGKILL`。连续第二次中断会立即强制回收子进程。

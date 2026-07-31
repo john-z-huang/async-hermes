@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
+import { dirname, join } from "node:path";
 
 import { verifyHealthCheck } from "../rpc/health-check.js";
 import { GrpcHermesClient, type HermesRpcClient } from "../rpc/hermes-client.js";
+import { releaseManifest } from "../release.js";
 
 export class PythonServerStartupError extends Error {
   public constructor(message: string) {
@@ -25,6 +27,21 @@ export function developmentPythonServerCommand(
     return { executable: pythonExecutable, args: ["-m", "hermes.interfaces.grpc_server", ...serverArgs] };
   const args = ["run", "hermes-grpc-server", ...serverArgs];
   return { executable: "uv", args };
+}
+
+/** 发布归档内的 Server 是独立平台二进制，绝不搜索用户机器上的 Python。 */
+export function packagedPythonServerCommand(
+  serverExecutable = join(dirname(process.execPath), process.platform === "win32" ? "hermes-server.exe" : "hermes-server"),
+): PythonServerCommand {
+  return {
+    executable: serverExecutable,
+    args: ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
+  };
+}
+
+/** Node SEA 运行时由 Node 注入；源码模式与普通 Node CLI 不触发该路径。 */
+export function isPackagedSeaRuntime(versions: NodeJS.ProcessVersions = process.versions): boolean {
+  return "sea" in versions;
 }
 
 type Spawn = (
@@ -59,13 +76,25 @@ function parseHandshake(line: string): string {
     typeof data !== "object" ||
     (data as { type?: unknown }).type !== "hermes-started" ||
     typeof (data as { address?: unknown }).address !== "string" ||
-    typeof (data as { protocol_version?: unknown }).protocol_version !== "string"
+    typeof (data as { protocol_version?: unknown }).protocol_version !== "string" ||
+    typeof (data as { release_version?: unknown }).release_version !== "string" ||
+    typeof (data as { python_package_version?: unknown }).python_package_version !== "string"
   ) {
     throw new PythonServerStartupError("Python Server 启动握手无效。");
   }
   const address = (data as { address: string }).address;
   if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(address)) {
     throw new PythonServerStartupError("Python Server 启动地址不安全。");
+  }
+  const versions = data as { protocol_version: string; release_version: string; python_package_version: string };
+  if (
+    versions.protocol_version !== releaseManifest.protocol_version ||
+    versions.release_version !== releaseManifest.release_version ||
+    versions.python_package_version !== releaseManifest.python_package_version
+  ) {
+    throw new PythonServerStartupError(
+      `Python Server 版本不兼容：需要发布版本 ${releaseManifest.release_version}、Python 包 ${releaseManifest.python_package_version} 和协议 ${releaseManifest.protocol_version}。请重新安装同一版本的 Hermes，或回滚到匹配版本。`,
+    );
   }
   return address;
 }

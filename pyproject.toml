@@ -23,6 +23,7 @@ packages = ["hermes"]
 [dependency-groups]
 dev = [
     "grpcio-tools>=1.83.0",
+    "pyinstaller>=6.16.0",
     "pytest>=9.1.1",
 ]
 
