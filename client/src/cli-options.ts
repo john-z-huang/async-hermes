@@ -19,7 +19,9 @@ export function optionsFromArgs(
   }
   if (configIndex !== -1 && !argv[configIndex + 1]) throw new Error("--config 要求提供配置文件路径。");
   const configPath = configIndex !== -1 && argv[configIndex + 1] ? argv[configIndex + 1] : (defaultPath ?? undefined);
-  const config = configPath ? loadConfig(configPath) : undefined;
+  const config = configPath
+    ? loadConfig(configPath, configIndex !== -1 ? (defaultPath ?? undefined) : undefined)
+    : undefined;
   const address =
     addressIndex !== -1 && argv[addressIndex + 1]
       ? argv[addressIndex + 1]

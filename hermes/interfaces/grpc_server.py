@@ -334,7 +334,10 @@ def main(argv: list[str] | None = None) -> None:
     config_path = config_args.config or default_config_path()
     if config_path is not None:
         try:
-            config = load_config(config_path)
+            config = load_config(
+                config_path,
+                defaults=default_config_path() if config_args.config is not None else None,
+            )
         except ConfigError as error:
             config_parser.error(str(error))
     parser = argparse.ArgumentParser(description="启动 Hermes 本地 gRPC Server")

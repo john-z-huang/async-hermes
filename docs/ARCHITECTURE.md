@@ -37,7 +37,8 @@ main.py
 
 配置不会从当前目录或 workspace 自动探测。未传入 `--config` 时，CLI、gRPC Server 与 SEA
 TUI 会读取存在的 `~/.async-hermes/config.toml`；该用户级文件不受当前工作目录和
-`--workspace` 限制。默认文件不存在时，各入口保留既有默认值。显式 CLI 参数优先；TUI 的
+`--workspace` 限制。调用时指定的 `--config` 会在读取默认文件后逐项覆盖同名字段，未声明
+的字段继续继承默认文件；默认文件不存在时，各入口保留既有默认值。显式 CLI 参数优先；TUI 的
 `HERMES_GRPC_ADDRESS` 在配置后覆盖、在 `--address` 前被覆盖。配置文件不得包含 API key、令牌、密码或 SDK 历史。旧
 `.json5` 文件不再读取；启动诊断会提示用户迁移至 `hermes.config.example.toml`。
 

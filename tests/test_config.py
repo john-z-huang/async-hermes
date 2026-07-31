@@ -112,3 +112,41 @@ def test_loads_user_default_config_outside_workspace(tmp_path: Path, monkeypatch
 
     assert args.config == config
     assert args.workspace == workspace
+
+
+def test_explicit_config_overrides_matching_user_defaults(tmp_path: Path) -> None:
+    global_directory = tmp_path / ".async-hermes"
+    global_directory.mkdir()
+    global_config = global_directory / "config.toml"
+    global_config.write_text(
+        '''version = 1
+[rpc]
+host = "127.0.0.1"
+port = 50051
+[agent]
+workspace = "."
+enableReasoning = false
+[tui]
+showReasoning = false
+''',
+        encoding="utf-8",
+    )
+    explicit_directory = tmp_path / "project"
+    explicit_directory.mkdir()
+    explicit_config = explicit_directory / "config.toml"
+    explicit_config.write_text(
+        '''[rpc]
+port = 60000
+[agent]
+enableReasoning = true
+''',
+        encoding="utf-8",
+    )
+
+    loaded = load_config(explicit_config, defaults=global_config)
+
+    assert loaded.rpc.host == "127.0.0.1"
+    assert loaded.rpc.port == 60000
+    assert loaded.agent.enable_reasoning is True
+    assert loaded.agent.workspace == global_directory.resolve()
+    assert loaded.tui.show_reasoning is False

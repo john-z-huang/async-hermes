@@ -83,6 +83,19 @@ describe("共享 TOML 配置", () => {
     expect(optionsFromArgs([], path)).toMatchObject({ address: "127.0.0.1:50051", configPath: path });
   });
 
+  it("调用时的配置字段覆盖用户级默认配置", () => {
+    const directory = mkdtempSync(join(tmpdir(), "hermes-config-"));
+    const globalPath = join(directory, "global.toml");
+    const explicitPath = join(directory, "explicit.toml");
+    writeFileSync(globalPath, 'version = 1\n[rpc]\nhost = "127.0.0.1"\nport = 50051\n[agent]\nenableReasoning = false');
+    writeFileSync(explicitPath, "[rpc]\nport = 60000\n[agent]\nenableReasoning = true");
+
+    expect(loadConfig(explicitPath, globalPath)).toMatchObject({
+      rpc: { host: "127.0.0.1", port: 60000 },
+      agent: { enableReasoning: true },
+    });
+  });
+
   it("未指定地址时默认由 Node 托管 Python Server", () => {
     expect(optionsFromArgs([], null).startPythonServer).toBe(true);
   });

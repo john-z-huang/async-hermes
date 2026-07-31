@@ -34,6 +34,24 @@ export function defaultConfigPath(homeDirectory = homedir()): string | undefined
   return existsSync(path) ? path : undefined;
 }
 
+function mergedConfig(defaults: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...defaults, ...overrides };
+  for (const section of ["rpc", "agent", "tui"]) {
+    const defaultSection = defaults[section];
+    const overrideSection = overrides[section];
+    if (
+      defaultSection &&
+      typeof defaultSection === "object" &&
+      !Array.isArray(defaultSection) &&
+      overrideSection &&
+      typeof overrideSection === "object" &&
+      !Array.isArray(overrideSection)
+    )
+      merged[section] = { ...defaultSection, ...overrideSection };
+  }
+  return merged;
+}
+
 function object(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ConfigError(`${field} 必须是对象。`);
   return value as Record<string, unknown>;
@@ -58,7 +76,7 @@ function boolean(values: Record<string, unknown>, field: string): boolean | unde
   return value;
 }
 
-export function loadConfig(configPath: string): HermesConfig {
+function readConfig(configPath: string): { path: string; root: Record<string, unknown> } {
   const path = resolve(configPath);
   if (extname(path).toLowerCase() === ".json5")
     throw new ConfigError(
@@ -70,7 +88,12 @@ export function loadConfig(configPath: string): HermesConfig {
   } catch (error) {
     throw new ConfigError(`无法解析 TOML 配置文件 ${path}：${String(error)}`);
   }
-  const root = object(parsed, "配置根");
+  return { path, root: object(parsed, "配置根") };
+}
+
+export function loadConfig(configPath: string, defaultPath?: string): HermesConfig {
+  const { path, root: overrides } = readConfig(configPath);
+  const root = defaultPath ? mergedConfig(readConfig(defaultPath).root, overrides) : overrides;
   unknown(root, ["version", "rpc", "agent", "tui"], "配置根");
   if (root.version !== 1) throw new ConfigError("仅支持配置版本 1。");
   const rpc = object(root.rpc, "rpc");
