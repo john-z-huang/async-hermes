@@ -2,7 +2,12 @@
 import { render } from "ink";
 
 import { optionsFromArgs } from "./cli-options.js";
-import { developmentPythonServerCommand, PythonServerLifecycle } from "./lifecycle/python-server.js";
+import {
+  developmentPythonServerCommand,
+  isPackagedSeaRuntime,
+  packagedPythonServerCommand,
+  PythonServerLifecycle,
+} from "./lifecycle/python-server.js";
 import { GrpcHermesClient } from "./rpc/hermes-client.js";
 import { App } from "./tui/App.js";
 
@@ -14,7 +19,7 @@ async function main(): Promise<void> {
     return;
   }
   const lifecycle = new PythonServerLifecycle({
-    command: developmentPythonServerCommand(options.configPath),
+    command: isPackagedSeaRuntime() ? packagedPythonServerCommand() : developmentPythonServerCommand(options.configPath),
     onUnexpectedExit: (message) => console.error(message),
   });
   let signalCount = 0;

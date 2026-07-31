@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import { ServingStatus, type HealthCheckResponse } from "../generated/v1/agent.js";
 import type { HermesRpcClient } from "../rpc/hermes-client.js";
-import { developmentPythonServerCommand, PythonServerLifecycle, PythonServerStartupError } from "./python-server.js";
+import {
+  developmentPythonServerCommand,
+  isPackagedSeaRuntime,
+  packagedPythonServerCommand,
+  PythonServerLifecycle,
+  PythonServerStartupError,
+} from "./python-server.js";
 
 class FakeChild extends EventEmitter {
   public readonly stdout = new PassThrough();
@@ -144,6 +150,15 @@ describe("PythonServerLifecycle", () => {
       executable: "/app/runtime/python",
       args: ["-m", "hermes.interfaces.grpc_server", "--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
     });
+  });
+
+  it("发布运行时从同目录的受控 Server 二进制启动", () => {
+    expect(packagedPythonServerCommand("/app/hermes-server")).toEqual({
+      executable: "/app/hermes-server",
+      args: ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
+    });
+    expect(isPackagedSeaRuntime({ sea: "1" } as unknown as NodeJS.ProcessVersions)).toBe(true);
+    expect(isPackagedSeaRuntime({ node: "26" } as unknown as NodeJS.ProcessVersions)).toBe(false);
   });
 
   it("强制停止会立即终止仍在运行的子进程", async () => {

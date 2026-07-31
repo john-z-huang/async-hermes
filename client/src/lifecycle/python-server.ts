@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
+import { dirname, join } from "node:path";
 
 import { verifyHealthCheck } from "../rpc/health-check.js";
 import { GrpcHermesClient, type HermesRpcClient } from "../rpc/hermes-client.js";
@@ -26,6 +27,21 @@ export function developmentPythonServerCommand(
     return { executable: pythonExecutable, args: ["-m", "hermes.interfaces.grpc_server", ...serverArgs] };
   const args = ["run", "hermes-grpc-server", ...serverArgs];
   return { executable: "uv", args };
+}
+
+/** 发布归档内的 Server 是独立平台二进制，绝不搜索用户机器上的 Python。 */
+export function packagedPythonServerCommand(
+  serverExecutable = join(dirname(process.execPath), process.platform === "win32" ? "hermes-server.exe" : "hermes-server"),
+): PythonServerCommand {
+  return {
+    executable: serverExecutable,
+    args: ["--host", "127.0.0.1", "--port", "0", "--startup-handshake"],
+  };
+}
+
+/** Node SEA 运行时由 Node 注入；源码模式与普通 Node CLI 不触发该路径。 */
+export function isPackagedSeaRuntime(versions: NodeJS.ProcessVersions = process.versions): boolean {
+  return "sea" in versions;
 }
 
 type Spawn = (
