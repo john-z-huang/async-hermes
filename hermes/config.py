@@ -117,14 +117,9 @@ def _merged_config(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[
 def load_config(value: str | Path, *, defaults: str | Path | None = None) -> HermesConfig:
     """加载 TOML 配置；调用方配置的字段覆盖可选用户级默认配置。"""
     path, root = _read_config(value)
-    overrides = root
-    workspace_base = path.parent
     if defaults is not None:
         defaults_path, default_root = _read_config(defaults)
         root = _merged_config(default_root, root)
-        override_agent = overrides.get("agent")
-        if isinstance(override_agent, dict) and "workspace" not in override_agent:
-            workspace_base = defaults_path.parent
 
     _unknown(root, {"version", "rpc", "agent", "tui"}, "配置根")
     if root.get("version") != CONFIG_VERSION:
@@ -147,7 +142,9 @@ def load_config(value: str | Path, *, defaults: str | Path | None = None) -> Her
     workspace_value = _string(agent_values, "agent.workspace")
     workspace = None
     if workspace_value is not None:
-        workspace = resolve_workspace(workspace_base / workspace_value)
+        # 相对路径相对运行时的当前工作目录解析，与 resolve_workspace(None)
+        # 默认返回 Path.cwd() 的语义保持一致，而非相对配置文件所在目录。
+        workspace = resolve_workspace(workspace_value)
     permissions = _string(agent_values, "agent.permissions")
     if permissions is not None and permissions not in PERMISSION_PROFILES:
         raise ConfigError(f"agent.permissions 不受支持：{permissions}。")
